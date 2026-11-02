@@ -10,7 +10,8 @@ Controlador do jogador para **Godot 4.3+**.
 | `scripts/kane/kane_hud.gd` | Barras de HP/FURY (exemplo) |
 | `scripts/kane/training_dummy.gd` | Inimigo de exemplo com `take_hit()` |
 | `scenes/demo.tscn` | Cena de teste (corre com F5) |
-| `web/kane-teste.html` | Versão web com controlos de toque (para testar no telemóvel) |
+| `web/kane-teste.html` | Versão web com controlos de toque e VFX (gerada: `python3 web/build.py`) |
+| `web/src/game.js` | Código do jogo web e motor de VFX (bloom aditivo, partículas, luz dinâmica, câmara) |
 | `tools/extract_kane_sprites.py` | Recorta a sheet de referência e gera as sprite sheets |
 
 ## Arte
