@@ -6,6 +6,8 @@ import base64, pathlib
 root = pathlib.Path(__file__).parent
 shell = (root / "src/shell.html").read_text()
 game = (root / "src/game.js").read_text()
+assert "/*__LEVEL__*/" in game
+game = game.replace("/*__LEVEL__*/", (root / "src/level.js").read_text())
 def uri(name):
     return '"data:image/png;base64,' + base64.b64encode((root / name).read_bytes()).decode() + '"'
 assert "/*__GAME__*/" in shell and '"__ATLAS__"' in game and '"__TROOPER__"' in game

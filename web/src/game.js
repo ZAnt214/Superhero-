@@ -160,26 +160,18 @@ function tinted(hex, img = ATLAS) {
 }
 
 // ---------------------------------------------------------------- mundo
-const WORLD_W = 2200, FLOOR_Y = 500;
-const solids = [
-  { x: -100, y: FLOOR_Y, w: WORLD_W + 200, h: 200 },
-  { x: -100, y: -400, w: 100, h: 1100 },
-  { x: WORLD_W, y: -400, w: 100, h: 1100 },
-  { x: 760, y: 360, w: 200, h: 20 },
-  { x: 1100, y: 270, w: 160, h: 20 },
-  { x: 1300, y: 360, w: 240, h: 20 },
-];
+/*__LEVEL__*/
 const enemies = [];
-function spawnEnemy(x) { enemies.push({ type: "dummy", x, y: FLOOR_Y, vx: 0, vy: 0, w: 34, h: 130, hp: 120, maxHp: 120, flash: 0, dead: 0, dissolve: 0, squash: 0, home: x }); }
+function spawnEnemy(x) { enemies.push({ type: "dummy", x, y: surfaceY(x), homeY: surfaceY(x), vx: 0, vy: 0, w: 34, h: 130, hp: 120, maxHp: 120, flash: 0, dead: 0, dissolve: 0, squash: 0, home: x }); }
 function spawnTrooper(x) {
-  enemies.push({ type: "trooper", x, y: FLOOR_Y, vx: 0, vy: 0, w: 44, h: 124, hp: 280, maxHp: 280, flash: 0, dead: 0, squash: 0, home: x,
+  enemies.push({ type: "trooper", x, y: surfaceY(x), homeY: surfaceY(x), vx: 0, vy: 0, w: 44, h: 124, hp: 280, maxHp: 280, flash: 0, dead: 0, squash: 0, home: x,
     facing: -1, state: "patrol", st: 0, cd: 1.2, shots: 0, recoil: 0, anim: Math.random() * 3, pdir: -1, deathT: 0, stepT: 0, smokeT: 0, onFloor: true });
 }
-[620, 1500].forEach(spawnEnemy);
-[1050, 1850].forEach(spawnTrooper);
+[700, 2560, 4060].forEach(spawnEnemy);              // bonecos: rua, telhado A, zona industrial
+[1210, 1960, 3060, 4450, 5000].forEach(spawnTrooper); // soldados: praça, viaduto, telhado B, terra queimada
 
 const k = {
-  x: 320, y: FLOOR_Y, vx: 0, vy: 0, facing: 1, hp: C.maxHp, fury: C.maxFury,
+  x: 200, y: FLOOR_Y, vx: 0, vy: 0, facing: 1, hp: C.maxHp, fury: C.maxFury,
   flying: false, onFloor: false, action: "none", t: 0, coyote: 0, jumpBuf: 0, invuln: 0,
   laserTick: 0, energy: false, hitIds: new Set(), beam: null, beamFade: 0, lastBeam: null, aim: null,
   anim: 0, dead: false, moveAnim: false, squash: 0, stretch: 0, turnT: 0, rot: 0, flyPose: false, laserSound: false,
@@ -189,7 +181,7 @@ const k = {
 let floats = [], time = 0, hitstop = 0;
 
 // ---------------------------------------------------------------- câmara (trauma + zoom)
-const cam = { x: 320, trauma: 0, zoom: 1, kick: 0, dirX: 0, dirY: 0, seed: Math.random() * 100 };
+const cam = { x: 200, y: 690, trauma: 0, zoom: 1, kick: 0, dirX: 0, dirY: 0, seed: Math.random() * 100 };
 function addTrauma(a, dx = 0, dy = 0) { cam.trauma = Math.min(1, cam.trauma + a); cam.dirX += dx; cam.dirY += dy; }
 function zoomKick(a) { cam.kick = Math.max(cam.kick, a); }
 
@@ -654,7 +646,7 @@ function updateEnemies(dt) {
     }
     if (e.dead > 0) {
       e.dead -= dt;
-      if (e.dead <= 0) Object.assign(e, { dead: 0, dissolve: 0, hp: e.maxHp, x: e.home, y: FLOOR_Y, vx: 0, vy: 0 });
+      if (e.dead <= 0) Object.assign(e, { dead: 0, dissolve: 0, hp: e.maxHp, x: e.home, y: e.homeY, vx: 0, vy: 0 });
       continue;
     }
     e.vy = Math.min(e.vy + 1400 * dt, 900);
@@ -712,6 +704,11 @@ function updateTrooper(e, dt) {
       if (Math.random() < 0.4) spray("sparkHot", e.x + rand(-14, 14), e.y - rand(40, 110), 1, { speed: 160, life: 0.3, size: 1.5 });
       if (e.st >= 0.5) { e.state = "chase"; e.st = 0; e.cd = Math.max(e.cd, 0.6); }
       break;
+  }
+  // não cai de telhados/viaduto: para à beira (e na patrulha dá meia-volta)
+  if (target !== 0 && e.onFloor && groundBelow(e.x + Math.sign(target) * 30, e.y - 4) > e.y + 8) {
+    if (e.state === "patrol") e.pdir = -e.pdir;
+    target = 0;
   }
   e.vx = approach(e.vx, target, 700 * dt);
   e.vy = Math.min(e.vy + 1400 * dt, 900);
@@ -848,7 +845,7 @@ function trooperDeathUpdate(e, dt) {
     if (Math.random() < 0.3) emit("ember", e.x + rand(-20, 20), e.y - 10, rand(-20, 20), rand(-80, -30), 0.6, 2, 1, "front");
   }
   if (e.deathT > 0.6 && e.dead > 1) light(e.x, e.y - 10, 70, PAL.ember, 0.4 + 0.2 * Math.sin(time * 9));
-  if (e.dead <= 0) Object.assign(e, { dead: 0, hp: e.maxHp, x: e.home, y: FLOOR_Y, vx: 0, vy: 0, state: "patrol", st: 0, cd: 1.5 });
+  if (e.dead <= 0) Object.assign(e, { dead: 0, hp: e.maxHp, x: e.home, y: e.homeY, vx: 0, vy: 0, state: "patrol", st: 0, cd: 1.5 });
 }
 function trooperFrame(e) {
   if (e.dead > 0) return [2, Math.min(4, Math.floor(e.deathT / 0.13))];
@@ -1019,7 +1016,7 @@ function updateKane(dt) {
     if (released("jump") && k.vy < 0) k.vy *= C.jumpCut;
   }
   moveAndSlide(k, C.bodyW, C.bodyH, dt);
-  if (k.y < 70) { k.y = 70; k.vy = Math.max(k.vy, 0); }
+  if (k.y < 150) { k.y = 150; k.vy = Math.max(k.vy, 0); }   // teto do céu
 
   k.fury = C.maxFury;                                           // energia infinita
   if (!k.beam) k.laserPow = Math.max(0, k.laserPow - C.powerDecay * dt);   // potência dissipa-se sem feixe
@@ -1083,7 +1080,7 @@ function kneelPoint(p) {
   const dx = p.x, dy = p.y - HIP, c = Math.cos(a), sn = Math.sin(a);
   return { x: k.x + (dx * c - dy * sn - 4 * kp) * k.facing, y: k.y + HIP + drop + dx * sn + dy * c };
 }
-function respawn() { Object.assign(k, { x: 320, y: FLOOR_Y, vx: 0, vy: 0, hp: C.maxHp, fury: C.maxFury, dead: false, invuln: 1, action: "none" }); }
+function respawn() { Object.assign(k, { x: 200, y: FLOOR_Y, vx: 0, vy: 0, hp: C.maxHp, fury: C.maxFury, dead: false, invuln: 1, action: "none" }); }
 
 // ---------------------------------------------------------------- estado de animação
 function updateAnimState() {
@@ -1359,47 +1356,6 @@ function laserEndFx(eye) {
 }
 
 // ---------------------------------------------------------------- desenho: fundo e cenário
-let bgGrad = null;
-const ashMotes = Array.from({ length: 50 }, () => ({ x: Math.random() * WORLD_W, y: Math.random() * 480, s: rand(1, 2.5), v: rand(6, 18), ph: Math.random() * 6 }));
-function drawBackground(left, top, w, h) {
-  if (!bgGrad) {
-    bgGrad = ctx.createLinearGradient(0, 0, 0, FLOOR_Y);
-    bgGrad.addColorStop(0, "#07090f"); bgGrad.addColorStop(0.65, "#0f1420"); bgGrad.addColorStop(1, "#1a1418");
-  }
-  ctx.fillStyle = bgGrad; ctx.fillRect(left - 20, top - 20, w + 40, h + 40);
-  // lua avermelhada atrás da névoa
-  ADD(); glow(left + w * 0.78 - (left * 0.05), 120, 140, "#ff5a4a", 0.18); glow(left + w * 0.78 - (left * 0.05), 120, 30, "#ffd0c0", 0.35); NORMAL();
-  // duas camadas de prédios em parallax com janelas
-  const layers = [[0.25, "#121826", 210, 70, 200, 50], [0.5, "#161d2c", 140, 110, 120, 40]];
-  for (const [par, col, step, bw, base, var_] of layers) {
-    const off = left * par;
-    for (let i = Math.floor((left - off) / step) - 1; i < (left - off + w) / step + 1; i++) {
-      const bx = i * step + off, bh = base + (((i * 73) % 8 + 8) % 8) * var_ / 2;
-      ctx.fillStyle = col; ctx.fillRect(bx, FLOOR_Y - bh, bw, bh);
-      ctx.fillStyle = "rgba(255,190,120,0.18)";
-      let ri = 0;
-      for (let wy = FLOOR_Y - bh + 12; wy < FLOOR_Y - 20; wy += 18, ri++) {
-        let ci = 0;
-        for (let wx = bx + 8; wx < bx + bw - 8; wx += 14, ci++) if (srand(i * 7.31 + ri * 1.7 + ci * 3.3 + par) > 0.86) ctx.fillRect(wx, wy, 4, 6);
-      }
-    }
-  }
-  // cinzas a pairar no ar (ambiente do "Colecionador de Cinzas")
-  for (const m of ashMotes) {
-    const x = ((m.x - left * 0.6) % (w + 40) + w + 40) % (w + 40) + left - 20;
-    const y = (m.y + time * m.v) % 480;
-    ctx.globalAlpha = 0.35; ctx.fillStyle = (m.ph > 5) ? "#ff8a3d" : "#6f717a";
-    ctx.fillRect(x + Math.sin(time + m.ph) * 6, y, m.s, m.s);
-  }
-  ctx.globalAlpha = 1;
-}
-function drawSolids() {
-  for (const s of solids) {
-    ctx.fillStyle = "#1c2230"; ctx.fillRect(s.x, s.y, s.w, s.h);
-    ctx.fillStyle = "#2c3446"; ctx.fillRect(s.x, s.y, s.w, 3);
-    ctx.fillStyle = "rgba(200,151,63,0.25)"; ctx.fillRect(s.x, s.y, s.w, 1);
-  }
-}
 function drawEnemy(e) {
   if (e.type === "trooper") return drawTrooper(e);
   if (e.dead > 0 && e.dissolve <= 0) return;
@@ -1722,17 +1678,23 @@ function render() {
   const visW = viewW / zoom, visH = viewH / zoom;
   const lookX = k.x + k.facing * 50 + k.vx * 0.15;
   cam.x += (clamp(lookX, visW / 2, WORLD_W - visW / 2) - cam.x) * 0.12;
+  // vertical: segue o Kane quando sobe (telhados, torre), com o chão a ~60 px do fundo quando está na rua
+  const lookY = k.y - 90 + (k.flying ? k.vy * 0.12 : 0);
+  cam.y += (clamp(lookY, visH / 2 + 60, FLOOR_Y + 60 - visH / 2) - cam.y) * 0.08;
   const tr = cam.trauma * cam.trauma, n = time * 30 + cam.seed;
   const shx = tr * 16 * (Math.sin(n * 1.7) + Math.sin(n * 3.1) * 0.5) + cam.dirX * tr;
   const shy = tr * 12 * (Math.sin(n * 2.3 + 1) + Math.sin(n * 4.3) * 0.5) + cam.dirY * tr;
   const S = scale * zoom;
-  camView = { S, cx: cam.x + shx, cy: 540 - visH / 2 + shy };   // chão sempre perto do fundo do ecrã
+  camView = { S, cx: cam.x + shx, cy: cam.y + shy };
   ctx.setTransform(S, 0, 0, S, cv.width / 2 - camView.cx * S, cv.height / 2 - camView.cy * S);
   const left = camView.cx - visW / 2, top = camView.cy - visH / 2;
 
   drawBackground(left, top, visW, visH);
-  drawSolids();
-  drawLights();                  // luz dos poderes no cenário e reflexo no chão (atrás das personagens)
+  drawSolids(left, top, visW, visH);
+  const nLights = lights.length;
+  drawProps(left, visW);         // candeeiros, néon, farol, fogueiras (acrescentam luzes só para este frame)
+  drawLights();                  // luz dos poderes e do cenário, com reflexo no chão (atrás das personagens)
+  lights.length = nLights;
   drawDecals();
   drawParticles("back");
   enemies.forEach(drawEnemy);
@@ -1760,6 +1722,7 @@ function render() {
     ctx.fillStyle = f.col || (f.big ? PAL.cyanSoft : "#fff"); ctx.fillText(f.v, f.x, fy);
   }
   ctx.globalAlpha = 1; ctx.textAlign = "left";
+  drawForeground(left, top, visW, visH);
   drawScreenFx();
   drawHud();
 }
@@ -1775,7 +1738,7 @@ function frame(now) {
     if (hitstop > 0) { hitstop -= STEP; updateParticles(STEP * 0.2); }      // hit-stop: o mundo quase para
     else {
       lights.length = 0;
-      updateKane(STEP); updateEnemies(STEP); updateBolts(STEP); Object.assign(prev, held);
+      updateKane(STEP); updateEnemies(STEP); updateBolts(STEP); updateProps(STEP); Object.assign(prev, held);
       updateParticles(STEP);
       k.beamFade = Math.max(0, k.beamFade - (k.beam ? 0 : STEP));
       for (let i = ghosts.length - 1; i >= 0; i--) if ((ghosts[i].t -= STEP) <= 0) ghosts.splice(i, 1);

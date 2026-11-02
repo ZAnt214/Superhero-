@@ -12,6 +12,7 @@ Controlador do jogador para **Godot 4.3+**.
 | `scenes/demo.tscn` | Cena de teste (corre com F5) |
 | `web/kane-teste.html` | Versão web com controlos de toque e VFX (gerada: `python3 web/build.py`) |
 | `web/src/game.js` | Código do jogo web e motor de VFX (bloom aditivo, partículas, luz dinâmica, câmara) |
+| `web/src/level.js` | Mapa "Distrito das Cinzas" gerado por código (colisão, pixel art, parallax, luzes) |
 | `tools/extract_kane_sprites.py` | Recorta a sheet de referência e gera as sprite sheets |
 
 ## Arte
@@ -48,3 +49,4 @@ Camadas de física: 1 = mundo, 2 = inimigos, 3 = jogador.
 - **Parado:** frame com os dois pés no chão e respiração (só o tronco mexe).
 - **Soldado de Choque** (`assets/trooper`, `tools/extract_trooper_sprites.py`): patrulha, persegue, ajoelha-se e dispara 3 projéteis com aviso de mira. O soco devolve os projéteis; o soco de energia e o laser máximo atordoam-no. Ao morrer, explode e deixa destroços a fumegar.
 - **Controlo analógico:** no ecrã tátil, o analógico aparece onde tocas na metade esquerda; empurrar mais = andar/voar mais depressa, e o laser aponta para o ângulo do polegar (até ±60°). Comandos físicos (Gamepad API): stick esquerdo ou D-pad, A salto, X soco, Y ou RT laser, LB/RB voo.
+- **Mapa "Distrito das Cinzas"** (5200×1000): rua de partida com carro a arder → praça elevada → viaduto partido → telhados com néon → zona industrial com torre e farol → terra queimada com fendas de lava. Céu com lua e fumo, 3 camadas de prédios em parallax, nevoeiro, cinzas a cair, candeeiros/néon/fogueiras que iluminam o cenário. A câmara segue o Kane também na vertical. Os soldados não caem dos telhados.
