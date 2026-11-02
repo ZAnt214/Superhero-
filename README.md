@@ -47,3 +47,4 @@ Camadas de física: 1 = mundo, 2 = inimigos, 3 = jogador.
 - **Pose do laser:** no chão usa a guarda; no ar usa a pose de pairar. O corpo inclina-se com a mira (para cima/baixo).
 - **Parado:** frame com os dois pés no chão e respiração (só o tronco mexe).
 - **Soldado de Choque** (`assets/trooper`, `tools/extract_trooper_sprites.py`): patrulha, persegue, ajoelha-se e dispara 3 projéteis com aviso de mira. O soco devolve os projéteis; o soco de energia e o laser máximo atordoam-no. Ao morrer, explode e deixa destroços a fumegar.
+- **Controlo analógico:** no ecrã tátil, o analógico aparece onde tocas na metade esquerda; empurrar mais = andar/voar mais depressa, e o laser aponta para o ângulo do polegar (até ±60°). Comandos físicos (Gamepad API): stick esquerdo ou D-pad, A salto, X soco, Y ou RT laser, LB/RB voo.

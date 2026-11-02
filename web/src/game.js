@@ -77,7 +77,8 @@ function resize() {
   viewW = cv.width / scale; viewH = cv.height / scale;
   ctx.imageSmoothingEnabled = false;
   safeTop = (parseFloat(getComputedStyle(document.documentElement).paddingTop) || 0) * dpr / scale;
-  safeLeft = (parseFloat(getComputedStyle(document.querySelector(".pad.left")).left) - 16 || 0) * dpr / scale;
+  const probe = document.getElementById("safe-probe");
+  safeLeft = (probe ? parseFloat(getComputedStyle(probe).paddingLeft) || 0 : 0) * dpr / scale;
   // vinheta em cache (escurece os cantos e faz a luz dos poderes sobressair)
   vignette = makeCanvas(cv.width, cv.height);
   const g = vignette.getContext("2d"), r = Math.hypot(cv.width, cv.height) / 2;
@@ -523,17 +524,20 @@ function drawLights() {
 }
 
 // ---------------------------------------------------------------- input
-const held = {}, prev = {};
+// held = estado combinado por tick (teclado/botões de toque + comando físico); evHeld = só eventos
+const held = {}, prev = {}, evHeld = {}, gpHeld = {};
+// analógico: virtual (toque) e comando físico; valores -1..1
+const stick = { x: 0, y: 0 }, gpStick = { x: 0, y: 0 };
 const pressed = n => held[n] && !prev[n];
 const released = n => !held[n] && prev[n];
 const KEYMAP = { KeyA: "left", ArrowLeft: "left", KeyD: "right", ArrowRight: "right", KeyW: "up", ArrowUp: "up",
   KeyS: "down", ArrowDown: "down", Space: "jump", ShiftLeft: "fly", ShiftRight: "fly", KeyF: "fly", KeyJ: "laser", KeyK: "punch" };
-addEventListener("keydown", e => { if (KEYMAP[e.code]) { held[KEYMAP[e.code]] = true; e.preventDefault(); } });
-addEventListener("keyup", e => { if (KEYMAP[e.code]) held[KEYMAP[e.code]] = false; });
+addEventListener("keydown", e => { if (KEYMAP[e.code]) { evHeld[KEYMAP[e.code]] = true; e.preventDefault(); } });
+addEventListener("keyup", e => { if (KEYMAP[e.code]) evHeld[KEYMAP[e.code]] = false; });
 document.querySelectorAll(".btn").forEach(b => {
   const n = b.dataset.k;
-  const on = e => { e.preventDefault(); held[n] = true; b.classList.add("on"); try { b.setPointerCapture(e.pointerId); } catch {} };
-  const off = () => { held[n] = false; b.classList.remove("on"); };
+  const on = e => { e.preventDefault(); evHeld[n] = true; b.classList.add("on"); try { b.setPointerCapture(e.pointerId); } catch {} };
+  const off = () => { evHeld[n] = false; b.classList.remove("on"); };
   b.addEventListener("pointerdown", on);
   b.addEventListener("pointerup", off);
   b.addEventListener("pointercancel", off);
@@ -541,6 +545,58 @@ document.querySelectorAll(".btn").forEach(b => {
   b.addEventListener("contextmenu", e => e.preventDefault());
 });
 document.addEventListener("gesturestart", e => e.preventDefault());
+
+// Analógico virtual flutuante: a base salta para onde o dedo toca; raio 50 px; zona morta 15%.
+(() => {
+  const zone = document.getElementById("stick");
+  if (!zone) return;
+  const base = document.getElementById("stick-base"), knob = document.getElementById("stick-knob");
+  const R = 50, DEAD = 0.15;
+  let id = null, cx = 0, cy = 0, rest = null;
+  const place = (x, y) => { const r = zone.getBoundingClientRect(); base.style.left = (x - r.left) + "px"; base.style.top = (y - r.top) + "px"; };
+  const move = (x, y) => {
+    let dx = x - cx, dy = y - cy;
+    const d = Math.hypot(dx, dy);
+    if (d > R) { dx *= R / d; dy *= R / d; }
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const m = Math.min(d, R) / R;
+    const k01 = m < DEAD ? 0 : (m - DEAD) / (1 - DEAD);          // resposta progressiva fora da zona morta
+    stick.x = d > 0 ? dx / Math.min(d, R) * k01 : 0; stick.y = d > 0 ? dy / Math.min(d, R) * k01 : 0;
+  };
+  zone.addEventListener("pointerdown", e => {
+    if (id !== null) return;
+    e.preventDefault(); id = e.pointerId;
+    try { zone.setPointerCapture(id); } catch (err) {}
+    if (!rest) rest = { left: base.style.left, top: base.style.top };
+    cx = e.clientX; cy = e.clientY; place(cx, cy); zone.classList.add("on"); move(cx, cy);
+  });
+  zone.addEventListener("pointermove", e => { if (e.pointerId === id) { e.preventDefault(); move(e.clientX, e.clientY); } });
+  const end = e => {
+    if (e.pointerId !== id) return;
+    id = null; stick.x = stick.y = 0; knob.style.transform = ""; zone.classList.remove("on");
+    base.style.left = rest.left; base.style.top = rest.top;
+  };
+  zone.addEventListener("pointerup", end); zone.addEventListener("pointercancel", end); zone.addEventListener("lostpointercapture", end);
+})();
+
+// Comando físico (Gamepad API, layout padrão): stick esquerdo/D-pad, A salto, X soco, Y ou RT laser, LB/RB voo.
+function pollGamepad() {
+  gpStick.x = gpStick.y = 0;
+  for (const n of ["jump", "punch", "laser", "fly", "left", "right", "up", "down"]) gpHeld[n] = false;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const g of pads) {
+    if (!g || !g.connected) continue;
+    const ax = g.axes[0] || 0, ay = g.axes[1] || 0, m = Math.hypot(ax, ay), DEAD = 0.18;
+    if (m > DEAD) { const s = (m - DEAD) / (1 - DEAD) / m; gpStick.x = ax * s; gpStick.y = ay * s; }
+    const b = i => !!(g.buttons[i] && (g.buttons[i].pressed || g.buttons[i].value > 0.4));
+    gpHeld.jump ||= b(0); gpHeld.punch ||= b(2); gpHeld.laser ||= b(3) || b(7); gpHeld.fly ||= b(4) || b(5);
+    gpHeld.up ||= b(12); gpHeld.down ||= b(13); gpHeld.left ||= b(14); gpHeld.right ||= b(15);
+  }
+}
+function syncInput() {
+  pollGamepad();
+  for (const n of ["jump", "punch", "laser", "fly", "left", "right", "up", "down"]) held[n] = !!(evHeld[n] || gpHeld[n]);
+}
 
 // ---------------------------------------------------------------- física
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -855,12 +911,22 @@ function setFlying(on) {
 }
 function start(a) { k.action = a; k.t = 0; }
 function setFury(v) { k.fury = clamp(v, 0, C.maxFury); }
+// Direção de movimento: o analógico (toque ou comando) é proporcional — empurrar pouco = andar devagar.
+// As teclas/D-pad dão o valor máximo. Fica a fonte com maior intensidade.
 function inputVec() {
   let x = (held.right ? 1 : 0) - (held.left ? 1 : 0), y = (held.down ? 1 : 0) - (held.up ? 1 : 0);
   const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; }
-  return { x, y };
+  for (const s of [stick, gpStick]) if (Math.hypot(s.x, s.y) > Math.hypot(x, y)) { x = s.x; y = s.y; }
+  return { x, y, analog: Math.hypot(stick.x, stick.y) > 0.01 || Math.hypot(gpStick.x, gpStick.y) > 0.01 };
 }
+// Mira do laser: com analógico aponta em qualquer ângulo (até ±60°) para o lado para onde o Kane olha;
+// com teclas, horizontal ou diagonal. No chão não aponta mais de 20° para baixo (o feixe bateria no chão).
 function aimDir(inp) {
+  if (inp.analog && Math.hypot(inp.x, inp.y) > 0.3) {
+    let a = Math.atan2(inp.y, Math.max(Math.abs(inp.x), 0.001));
+    a = clamp(a, -1.05, k.onFloor ? 0.35 : 1.05);
+    return { dx: k.facing * Math.cos(a), dy: Math.sin(a) };
+  }
   if (inp.y < -0.5) return { dx: k.facing * Math.SQRT1_2, dy: -Math.SQRT1_2 };
   if (inp.y > 0.5 && !k.onFloor) return { dx: k.facing * Math.SQRT1_2, dy: Math.SQRT1_2 };
   return { dx: k.facing, dy: 0 };
@@ -1705,6 +1771,7 @@ function frame(now) {
   acc += Math.min((now - last) / 1000, 0.1); last = now;
   while (acc >= STEP) {
     time += STEP;
+    syncInput();
     if (hitstop > 0) { hitstop -= STEP; updateParticles(STEP * 0.2); }      // hit-stop: o mundo quase para
     else {
       lights.length = 0;
