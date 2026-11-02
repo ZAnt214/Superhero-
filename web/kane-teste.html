@@ -88,7 +88,7 @@ const C = {
   gravity: 1400, fallMult: 1.5, maxFall: 900, jumpVel: -480, jumpCut: 0.45,
   coyote: 0.1, jumpBuffer: 0.12,
   flightSpeed: 320, flightAccel: 1600,
-  eye: { x: 6, y: -104 }, laserRange: 640, laserWindup: 0.12, laserDps: 45, laserTick: 0.1,
+  eye: { x: 10, y: -114 }, laserRange: 640, laserWindup: 0.12, laserDps: 45, laserTick: 0.1,
   laserFuryPerSec: 30, laserMinFury: 10, laserMoveMult: 0.35, laserKnock: 60,
   punchDmg: 18, punchKnock: 320, punchWindup: 0.07, punchActive: 0.1, punchRecovery: 0.16,
   punchLunge: 180, punchSize: { w: 44, h: 52 }, punchOff: { x: 28, y: -72 }, furyOnHit: 6,
@@ -109,7 +109,7 @@ const solids = [
   { x: 1300, y: 360, w: 240, h: 20 },
 ];
 const enemies = [];
-function spawnEnemy(x) { enemies.push({ x, y: 500, vx: 0, vy: 0, w: 34, h: 124, hp: 120, maxHp: 120, flash: 0, dead: 0, home: x }); }
+function spawnEnemy(x) { enemies.push({ x, y: 500, vx: 0, vy: 0, w: 34, h: 130, hp: 120, maxHp: 120, flash: 0, dead: 0, home: x }); }
 [620, 1000, 1500, 1900].forEach(spawnEnemy);
 
 const k = {
@@ -320,68 +320,115 @@ addEventListener("resize", resize); resize();
 
 const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x * 4, y * 4, w * 4, h * 4); };
 
+// Visual oficial do Kane (desenho do pack "Kane - O Colecionador de Cinzas"),
+// em unidades do desenho original: pés em y=+113, topo do capacete em y=-72.
+// Escala para 128 px de altura (frame 64x128 do kanepack001).
+const KV = { amber: "#d97706", amberDark: "#b45309", belt: "#78350f", boot: "#451a03",
+  suit: "#1e293b", cape: "#2a2e3d", capeEdge: "#3a4054", visor: "#ff3344", vortex: "#4ee4e5" };
+const KANE_SCALE = 128 / 185, FEET = 113;
+
 function drawKane() {
   if (k.invuln > 0 && Math.floor(k.invuln * 20) % 2) return;
   const moving = Math.abs(k.vx) > 20;
   const air = k.flying || !k.onFloor;
   const run = !air && moving && k.action === "none";
   const f = Math.floor(k.anim * (run ? 12 : 8));
-  const bob = !air && !moving ? (f % 6 < 3 ? 0 : 1) : 0;
+  const bob = !air && !moving ? (f % 6 < 3 ? 0 : 2) : 0;
+  const R = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+
   ctx.save();
   ctx.translate(k.x, k.y);
-  ctx.scale(k.facing, 1);
-  if (k.flying && moving) { ctx.translate(0, -60); ctx.rotate(0.35 * Math.min(Math.abs(k.vx) / C.flightSpeed, 1)); ctx.translate(0, 60); }
-  if (k.dead) { ctx.translate(0, 0); ctx.rotate(-1.4); }
+  ctx.scale(k.facing * KANE_SCALE, KANE_SCALE);
+  ctx.translate(0, -FEET);
+  if (k.flying && moving) ctx.rotate(0.3 * Math.min(Math.abs(k.vx) / C.flightSpeed, 1));
+  if (k.dead) { ctx.translate(0, FEET); ctx.rotate(-1.4); ctx.translate(0, -FEET); }
 
-  // capa (atrás)
-  const flow = air || moving ? 3 + (f % 2) : 0;
-  px(-6 - flow, -25 + bob, 4 + flow, 18 - (air ? 4 : 0), COL.cape);
-  px(-7 - flow, -10 + bob - (air ? 4 : 0), 3 + flow, 4, COL.capeEdge);
-
-  // pernas
-  const step = run ? [0, 2, 0, -2][f % 4] : 0;
-  const legY = air && !k.onFloor ? -1 : 0;
-  px(-4 + step / 2, -12 + legY, 3, 12 - (step > 0 ? 1 : 0), COL.suit);
-  px(1 - step / 2, -12 + legY, 3, 12 - (step < 0 ? 1 : 0), COL.suitLight);
-  px(-4 + step / 2, -7 + legY, 3, 2, COL.blue);
-  px(1 - step / 2, -7 + legY, 3, 2, COL.blueLight);
-  px(-4 + step / 2, -2 + legY, 3, 2, COL.goldDark);
-  px(1 - step / 2, -2 + legY, 3, 2, COL.gold);
-
-  // tronco
-  px(-5, -24 + bob, 10, 12, COL.suit);
-  px(-3, -23 + bob, 6, 6, COL.blue);
-  px(-2, -22 + bob, 4, 2, COL.blueLight);
-  px(-1, -19 + bob, 2, 3, COL.blueLight);
-  px(-5, -13 + bob, 10, 1, COL.gold);
-  px(-6, -25 + bob, 3, 3, COL.goldDark);
-  px(3, -25 + bob, 3, 3, COL.gold);
-
-  // braços
-  px(-7, -22 + bob, 2, 8, COL.suitLight);
-  px(-7, -15 + bob, 2, 2, COL.goldDark);
-  if (k.action === "punch" && k.t >= C.punchWindup) {
-    px(4, -20 + bob, 8, 2, COL.suitLight);
-    px(12, -21 + bob, 3, 4, COL.gold);
-    if (k.energy) {
-      ctx.fillStyle = COL.energy; ctx.globalAlpha = 0.5 + 0.5 * Math.sin(k.t * 60);
-      ctx.beginPath(); ctx.arc(64, (-19 + bob) * 4, 22, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
-    }
-  } else if (k.action === "charge") {
-    px(3, -18 + bob, 2, 5, COL.suitLight); px(1, -14 + bob, 3, 3, COL.gold);
-    const charged = k.t >= C.chargeTime && k.fury >= C.energyCost;
-    ctx.fillStyle = charged ? COL.energy : "rgba(95,184,255,.35)";
-    ctx.globalAlpha = 0.4 + 0.3 * Math.sin(k.t * 30);
-    ctx.beginPath(); ctx.arc(10, (-12.5 + bob) * 4, 8 + Math.min(k.t / C.chargeTime, 1) * 10, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
-  } else {
-    px(4, -22 + bob, 2, 8, COL.suitLight);
-    px(4, -15 + bob, 2, 2, COL.gold);
+  // 1. Vórtice de voo ciano (só no ar)
+  if (k.flying) {
+    const p = 1 + 0.15 * Math.sin(k.anim * 18);
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = KV.vortex; ctx.shadowColor = KV.vortex; ctx.shadowBlur = 15;
+    ctx.beginPath(); ctx.ellipse(0, 118, 50 * p, 10 * p, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.ellipse(0, 132, 32 * p, 6 * p, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
   }
 
-  // cabeça
-  px(-3, -31 + bob, 6, 7, COL.gold);
-  px(-3, -31 + bob, 6, 1, COL.goldDark);
-  px(-1, -28 + bob, 4, 2, k.action === "laser" ? "#ffd0d4" : COL.visor);
+  // 2. Capa escura segmentada (o lado de trás estica com o movimento)
+  const flow = air || moving ? 22 + (f % 2) * 6 : 0;
+  ctx.fillStyle = KV.cape;
+  ctx.beginPath();
+  ctx.moveTo(-35, -30 + bob);
+  ctx.lineTo(-70 - flow, 90 - flow * 0.8);
+  ctx.lineTo(-20 - flow * 0.5, 80 - flow * 0.5);
+  ctx.lineTo(65 - flow * 1.2, 95 - flow * 0.3);
+  ctx.lineTo(35, -30 + bob);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = KV.capeEdge;
+  ctx.beginPath();
+  ctx.moveTo(-35, -30 + bob); ctx.lineTo(-70 - flow, 90 - flow * 0.8); ctx.lineTo(-58 - flow, 88 - flow * 0.8);
+  ctx.lineTo(-28, -28 + bob); ctx.closePath(); ctx.fill();
+
+  // 3. Pernas, grevas e botas (corrida = passada alternada)
+  const lift = run ? [0, 12, 0, -12][f % 4] : 0;
+  const tuck = air ? 6 : 0;
+  const leg = (x, dy) => {
+    R(x, 35 + dy, 16, 75 - tuck, KV.suit);
+    R(x, 50 + dy, 16, 25, KV.amber);
+    R(x + (x < 0 ? -2 : 0), 95 + dy - tuck, 18, 18, KV.boot);
+  };
+  leg(-20, Math.max(lift, 0) * -1);
+  leg(4, Math.min(lift, 0));
+
+  // 4. Tronco e placas de armadura
+  R(-22, -30 + bob, 44, 65, KV.suit);
+  R(-36, -32 + bob, 16, 16, KV.amber);
+  R(20, -32 + bob, 16, 16, KV.amber);
+  R(-18, -25 + bob, 36, 28, KV.amber);
+  R(-14, -20 + bob, 28, 20, KV.amberDark);
+  R(-24, 18 + bob, 48, 10, KV.belt);
+  R(-20, 20 + bob, 8, 8, KV.amber);
+  R(12, 20 + bob, 8, 8, KV.amber);
+
+  // 5. Braço de trás com a aura vermelha de super-força (pulsa em repouso)
+  R(-34, -15 + bob, 12, 40, KV.suit);
+  R(-35, 10 + bob, 14, 15, KV.amber);
+  const idleAura = 0.55 + 0.25 * Math.sin(k.anim * 6);
+  ctx.globalAlpha = idleAura;
+  ctx.fillStyle = KV.visor; ctx.shadowColor = KV.visor; ctx.shadowBlur = 20;
+  ctx.beginPath(); ctx.arc(-28, 28 + bob, 11, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+
+  // 6. Capacete e visor laser
+  ctx.fillStyle = KV.amber;
+  ctx.beginPath(); ctx.arc(0, -52 + bob, 20, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = k.action === "laser" ? "#ffd6da" : KV.visor;
+  ctx.shadowColor = KV.visor; ctx.shadowBlur = k.action === "laser" ? 24 : 12;
+  ctx.fillRect(-16, -55 + bob, 32, 7);
+  ctx.shadowBlur = 0;
+
+  // 7. Braço da frente: normal, a carregar ou a socar
+  if (k.action === "punch" && k.t >= C.punchWindup) {
+    R(22, -18 + bob, 52, 12, KV.suit);
+    R(66, -21 + bob, 16, 18, KV.amber);
+    const r = k.energy ? 26 : 10;
+    ctx.fillStyle = KV.visor; ctx.shadowColor = KV.visor; ctx.shadowBlur = k.energy ? 30 : 14;
+    ctx.globalAlpha = k.energy ? 0.75 + 0.25 * Math.sin(k.t * 60) : 0.7;
+    ctx.beginPath(); ctx.arc(84, -12 + bob, r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  } else if (k.action === "charge") {
+    R(22, -15 + bob, 12, 30, KV.suit);
+    R(14, 8 + bob, 16, 14, KV.amber);
+    const charged = k.t >= C.chargeTime && k.fury >= C.energyCost;
+    const grow = Math.min(k.t / C.chargeTime, 1);
+    ctx.fillStyle = KV.visor; ctx.shadowColor = KV.visor; ctx.shadowBlur = charged ? 30 : 12;
+    ctx.globalAlpha = charged ? 0.9 : 0.4 + 0.2 * Math.sin(k.t * 30);
+    ctx.beginPath(); ctx.arc(22, 20 + bob, 8 + grow * 14, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  } else {
+    R(22, -15 + bob, 12, 40, KV.suit);
+    R(21, 10 + bob, 14, 15, KV.amber);
+  }
   ctx.restore();
 }
 
