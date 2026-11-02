@@ -51,7 +51,7 @@ enum Action { NONE, PUNCH_CHARGE, PUNCH, LASER }
 @export var flight_fury_cost := 0.0     ## por segundo (0 = voo grátis)
 
 @export_group("Laser Eyes")
-@export var eye_offset := Vector2(15, -97)   ## relativo aos pés, a olhar para a direita
+@export var eye_offset := Vector2(12, -97)   ## relativo aos pés, a olhar para a direita
 @export var laser_range := 640.0
 @export var laser_windup := 0.12
 @export var laser_dps := 45.0
@@ -459,13 +459,15 @@ func _update_animation() -> void:
 				f = 3
 			_show_frame(A_PUNCH, f)
 		_:
-			if absf(velocity.x) > 25.0 or (not is_on_floor() and not is_flying):
+			# voo em deslocação usa run_flight; no chão a corrida usa o idle mais rápido
+			# (a sheet não tem ciclo de corrida e os frames de voo no chão parecem um erro)
+			if is_flying and velocity.length() > 45.0:
 				_play(A_RUN)
-				_sprite.speed_scale = clampf(absf(velocity.x) / run_speed, 0.6, 1.4) \
-					if is_on_floor() and not is_flying else 1.0
+				_sprite.speed_scale = 1.0
 			else:
 				_play(A_IDLE)
-				_sprite.speed_scale = 1.0
+				var running := is_on_floor() and absf(velocity.x) > 45.0
+				_sprite.speed_scale = 1.5 if running else 1.0
 
 
 func _play(anim: StringName) -> void:

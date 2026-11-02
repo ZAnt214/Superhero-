@@ -9,24 +9,25 @@ extends RefCounted
 ##   "attack_laser"  <- attack sheet, colunas LASER_COLS
 ##   "attack_punch"  <- attack sheet, colunas PUNCH_COLS
 
-## Colunas da attack sheet (0-based): 0 = guarda, 1 = soco a sair,
-## 2 = impacto, 3 = onda de choque, 4 = regresso à guarda.
+## Colunas da attack sheet (0-based): 0 = guarda, 1 = braço esticado, 2 = recuo, 3 = regresso.
+## A animação "attack_punch" tem 5 frames: guarda, esticado (impacto), esticado
+## (follow-through), recuo, regresso. Os FX (explosão, onda de choque) são desenhados em código.
 ## O laser usa a pose de guarda; o feixe é desenhado pelo KanePlayer.
 const LASER_COLS: Array[int] = [0, 0]
-const PUNCH_COLS: Array[int] = [0, 1, 2, 3, 4]
+const PUNCH_COLS: Array[int] = [0, 1, 1, 2, 3]
 
-var frame_size := Vector2i(192, 144)
-var origin := Vector2(96, 140)  # pés do personagem dentro do frame
+var frame_size := Vector2i(224, 144)
+var origin := Vector2(112, 140)  # pés do personagem dentro do frame
 
 
 func build(json_path: String, idle_sheet: Texture2D, run_sheet: Texture2D, attack_sheet: Texture2D) -> SpriteFrames:
 	var data := _read_json(json_path)
 	var meta: Dictionary = data.get("meta", {})
 	var size: Dictionary = meta.get("size", {})
-	frame_size = Vector2i(int(size.get("w", 192)), int(size.get("h", 144)))
+	frame_size = Vector2i(int(size.get("w", 224)), int(size.get("h", 144)))
 	var o: Dictionary = meta.get("origin", {})
 	# O pack original tem "origin": {"x": 32, "h": 120} — aceitamos "y" ou "h".
-	origin = Vector2(float(o.get("x", 96)), float(o.get("y", o.get("h", 140))))
+	origin = Vector2(float(o.get("x", 112)), float(o.get("y", o.get("h", 140))))
 
 	var anims: Dictionary = data.get("animations", {})
 	var idle: Dictionary = anims.get("idle", {})
@@ -40,7 +41,7 @@ func build(json_path: String, idle_sheet: Texture2D, run_sheet: Texture2D, attac
 		_count(idle, 4), float(idle.get("fps", 8)), true, [])
 	_add_strip(frames, &"run_flight", _or_placeholder(run_sheet, 4, Color(0.3, 0.35, 0.6)),
 		_count(run, 4), float(run.get("fps", 12)), true, [])
-	var atk := _or_placeholder(attack_sheet, 5, Color(0.7, 0.25, 0.25))
+	var atk := _or_placeholder(attack_sheet, 4, Color(0.7, 0.25, 0.25))
 	var atk_fps := float(attack.get("fps", 12))
 	_add_strip(frames, &"attack_laser", atk, 0, atk_fps, false, LASER_COLS)
 	_add_strip(frames, &"attack_punch", atk, 0, atk_fps, false, PUNCH_COLS)
