@@ -1,0 +1,19 @@
+config_version=5
+
+[application]
+config/name="Superhero - Kane"
+run/main_scene="res://scenes/demo.tscn"
+config/features=PackedStringArray("4.3")
+
+[display]
+window/size/viewport_width=960
+window/size/viewport_height=540
+window/stretch/mode="canvas_items"
+
+[layer_names]
+2d_physics/layer_1="world"
+2d_physics/layer_2="enemies"
+2d_physics/layer_3="player"
+
+[rendering]
+textures/canvas_textures/default_texture_filter=0
