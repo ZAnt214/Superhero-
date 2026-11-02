@@ -42,6 +42,8 @@ O método pode estar no corpo do inimigo ou no pai de uma hurtbox `Area2D`.
 Camadas de física: 1 = mundo, 2 = inimigos, 3 = jogador.
 
 ## Mecânicas (versão web)
-- **Laser por níveis:** quanto mais tempo manténs o laser, mais forte fica. Nível 1 (vermelho) → nível 2 aos 0,9 s (laranja, mais largo, destrói projéteis) → máximo aos 2 s (branco incandescente, relâmpagos, atravessa inimigos e atordoa-os, empurra o Kane para trás). Cada nível gasta mais FURY.
-- **Exaustão:** se a FURY chega a zero, o Kane perde as forças, cai se estiver a voar e ajoelha-se. Recupera mais depressa ajoelhado e só se levanta aos 40 de FURY. Abaixo de 25 fica fraco (mais lento, visor a falhar).
+- **Laser com energia infinita:** a barra LASER mostra a potência do feixe. Enche enquanto disparas (nível 2 aos 0,9 s, máximo aos 2 s, cheia aos 2,9 s) e esvazia em ~1,8 s depois de largar. A largura do feixe segue a barra de forma contínua e a cor muda em cada nível (vermelho → laranja → branco incandescente). Voltar a disparar antes de a barra esvaziar continua da potência que resta.
+- **Sobrecarga:** disparar no nível máximo cansa o corpo. Ao largar depois de mais de 0,6 s no máximo, o Kane ajoelha-se para recuperar (0,9 s + 0,35 s por cada segundo no máximo, até 2,4 s). Disparos curtos não o cansam.
+- **Pose do laser:** no chão usa a guarda; no ar usa a pose de pairar. O corpo inclina-se com a mira (para cima/baixo).
+- **Parado:** frame com os dois pés no chão e respiração (só o tronco mexe).
 - **Soldado de Choque** (`assets/trooper`, `tools/extract_trooper_sprites.py`): patrulha, persegue, ajoelha-se e dispara 3 projéteis com aviso de mira. O soco devolve os projéteis; o soco de energia e o laser máximo atordoam-no. Ao morrer, explode e deixa destroços a fumegar.
