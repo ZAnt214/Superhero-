@@ -21,6 +21,13 @@ const C = {
   punchLunge: 180, punchSize: { w: 44, h: 52 }, punchOff: { x: 28, y: -72 }, furyOnHit: 6,
   chargeTime: 0.4, energyCost: 25, energyDmgMult: 2.5, energyKnockMult: 2.2, energySizeMult: 1.6,
   bodyW: 28, bodyH: 108,
+  // laser em níveis: quanto mais tempo seguras, mais forte (e mais gasta)
+  laserLevels: [
+    { at: 0.0, dmg: 1.0, width: 1.0, drain: 22, knock: 1.0, pierce: false, outer: "#ff2b3d", mid: "#ff2b3d", core: "#ffc2c8" },
+    { at: 0.9, dmg: 1.9, width: 1.65, drain: 30, knock: 2.0, pierce: false, outer: "#ff3a1a", mid: "#ff7a2a", core: "#ffe0a0" },
+    { at: 2.0, dmg: 3.2, width: 2.5, drain: 40, knock: 3.5, pierce: true, outer: "#ff1a5a", mid: "#ffb347", core: "#ffffff" },
+  ],
+  weakAt: 25, recoverAt: 40, kneelRegen: 2.6,   // exaustão: barra a zero → ajoelha até recuperar
 };
 // Pontos medidos nos frames (assets/kane/kane_points.json), relativos aos pés, a olhar para a direita.
 const PT = {
@@ -41,6 +48,7 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const easeOut = t => 1 - Math.pow(1 - t, 3);
+const easeInOut = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 const approach = (v, t, d) => v < t ? Math.min(v + d, t) : Math.max(v - d, t);
 function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
 function makeCanvas(w, h) { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; }
@@ -131,14 +139,19 @@ const FW = 224, FH = 144, OX = 112, OY = 140;
 const ATLAS = new Image();
 ATLAS.src = "__ATLAS__";
 const ROW = { idle: 0, move: 1, punch: 2 };
+// Soldado de Choque (tools/extract_trooper_sprites.py): linha 0 [parado, ajoelhado a apontar], 1 corrida (4), 2 derrota (5)
+const TROOPER = new Image();
+TROOPER.src = "__TROOPER__";
+const TR = { muzzleAim: { x: 56, y: -44 }, visorStand: { x: 3, y: -115 }, visorAim: { x: 5, y: -66 }, exhaust: { x: -22, y: -126 } };
 const tintCache = {};
 // Versão do atlas pintada de uma cor (para aura de contorno, fantasmas, clarões de dano).
-function tinted(hex) {
-  if (tintCache[hex]) return tintCache[hex];
-  const c = makeCanvas(ATLAS.width, ATLAS.height), g = c.getContext("2d");
-  g.drawImage(ATLAS, 0, 0);
+function tinted(hex, img = ATLAS) {
+  const key = hex + (img === ATLAS ? "" : "T");
+  if (tintCache[key]) return tintCache[key];
+  const c = makeCanvas(img.width, img.height), g = c.getContext("2d");
+  g.drawImage(img, 0, 0);
   g.globalCompositeOperation = "source-atop"; g.fillStyle = hex; g.fillRect(0, 0, c.width, c.height);
-  return (tintCache[hex] = c);
+  return (tintCache[key] = c);
 }
 
 // ---------------------------------------------------------------- mundo
@@ -152,14 +165,20 @@ const solids = [
   { x: 1300, y: 360, w: 240, h: 20 },
 ];
 const enemies = [];
-function spawnEnemy(x) { enemies.push({ x, y: FLOOR_Y, vx: 0, vy: 0, w: 34, h: 130, hp: 120, maxHp: 120, flash: 0, dead: 0, dissolve: 0, squash: 0, home: x }); }
-[620, 1000, 1500, 1900].forEach(spawnEnemy);
+function spawnEnemy(x) { enemies.push({ type: "dummy", x, y: FLOOR_Y, vx: 0, vy: 0, w: 34, h: 130, hp: 120, maxHp: 120, flash: 0, dead: 0, dissolve: 0, squash: 0, home: x }); }
+function spawnTrooper(x) {
+  enemies.push({ type: "trooper", x, y: FLOOR_Y, vx: 0, vy: 0, w: 44, h: 124, hp: 280, maxHp: 280, flash: 0, dead: 0, squash: 0, home: x,
+    facing: -1, state: "patrol", st: 0, cd: 1.2, shots: 0, recoil: 0, anim: Math.random() * 3, pdir: -1, deathT: 0, stepT: 0, smokeT: 0, onFloor: true });
+}
+[620, 1500].forEach(spawnEnemy);
+[1050, 1850].forEach(spawnTrooper);
 
 const k = {
   x: 320, y: FLOOR_Y, vx: 0, vy: 0, facing: 1, hp: C.maxHp, fury: C.maxFury,
   flying: false, onFloor: false, action: "none", t: 0, coyote: 0, jumpBuf: 0, invuln: 0,
   laserTick: 0, energy: false, hitIds: new Set(), beam: null, beamFade: 0, lastBeam: null, aim: null,
   anim: 0, dead: false, moveAnim: false, squash: 0, stretch: 0, turnT: 0, rot: 0, flyPose: false, laserSound: false,
+  laserHold: 0, laserLevel: 1, exhausted: false, kneel: 0, kneelLanded: false, pantT: 0, weak: false,
   hurtFlash: 0, whiteFlash: 0, chargedPing: false, stepT: 0, ghostT: 0, scorchT: 0,
 };
 let floats = [], time = 0, hitstop = 0;
@@ -253,6 +272,39 @@ const SFX = (() => {
       hiss(t, 1.1, 0.28, o, { f0: 900, f1: 250, q: 0.8, attack: 0.05 });
       for (let i = 0; i < 14; i++) hiss(t + Math.random() * 0.9, 0.02, 0.1 + Math.random() * 0.2, o, { type: "highpass", f0: 2500 + Math.random() * 3000 });
     },
+    // --- poder do laser e exaustão
+    levelUp(l) {
+      const t = T(), o = bus(0.45), base = [0, 330, 440, 587][l];
+      [1, 1.25, 1.5].forEach((m, i) => tone("triangle", base * m, base * m * 1.01, t + i * 0.05, 0.4, 0.12, o));
+      tone("sawtooth", 80, 80 * (1 + l), t, 0.35, 0.1 + l * 0.04, o, 0.01);
+      hiss(t, 0.3, 0.15 + l * 0.05, o, { f0: 2000, f1: 8000, q: 1, attack: 0.02 });
+    },
+    powerDown() {
+      const t = T(), o = bus(0.4);
+      tone("sawtooth", 520, 45, t, 1.1, 0.16, o, 0.01); tone("sine", 260, 30, t, 1.2, 0.2, o);
+      hiss(t, 0.9, 0.12, o, { f0: 3000, f1: 200, q: 0.8 });
+    },
+    powerUp() { const t = T(), o = bus(0.3); tone("sawtooth", 60, 300, t, 0.45, 0.1, o, 0.05); tone("sine", 200, 800, t, 0.4, 0.1, o, 0.05); },
+    kneelThud() { const t = T(), o = bus(0.25); tone("sine", 120, 38, t, 0.35, 0.7, o); hiss(t, 0.18, 0.35, o, { type: "lowpass", f0: 1200, f1: 200 }); tone("square", 70, 40, t, 0.12, 0.1, o); },
+    pant() { const t = T(), o = bus(0.05, 0.6); hiss(t, 0.22, 0.12, o, { f0: 900, f1: 600, q: 1.5, attack: 0.08 }); hiss(t + 0.32, 0.18, 0.08, o, { f0: 700, f1: 500, q: 1.5, attack: 0.06 }); },
+    // --- Soldado de Choque
+    heavyStep(v = 1) { const t = T(), o = bus(0.1, v); tone("sine", 90, 35, t, 0.18, 0.5, o); hiss(t, 0.08, 0.25, o, { type: "lowpass", f0: 500 }); hiss(t + 0.02, 0.05, 0.12, o, { type: "highpass", f0: 3000 }); },
+    cannonCharge() { const t = T(), o = bus(0.2); tone("sawtooth", 70, 420, t, 0.75, 0.09, o, 0.05); hiss(t, 0.75, 0.1, o, { f0: 600, f1: 4000, q: 4, attack: 0.1 }); },
+    cannon() {
+      const t = T(), o = bus(0.3);
+      tone("square", 220, 55, t, 0.16, 0.22, o); tone("sine", 140, 40, t, 0.25, 0.5, o);
+      hiss(t, 0.12, 0.45, o, { type: "lowpass", f0: 6000, f1: 800 });
+    },
+    boltHit() { const t = T(), o = bus(0.3); tone("sine", 180, 50, t, 0.22, 0.4, o); hiss(t, 0.2, 0.35, o, { type: "lowpass", f0: 3000, f1: 300 }); },
+    reflect() { const t = T(), o = bus(0.4); tone("triangle", 1400, 2800, t, 0.18, 0.18, o); tone("sine", 700, 1400, t, 0.25, 0.12, o); hiss(t, 0.1, 0.2, o, { type: "highpass", f0: 4000 }); },
+    zap() { const t = T(), o = bus(0.15); tone("sawtooth", 1800, 300, t, 0.12, 0.1, o); hiss(t, 0.1, 0.25, o, { type: "highpass", f0: 2500 }); },
+    explosion() {
+      const t = T(), o = bus(0.6);
+      tone("sine", 110, 28, t, 1.1, 1, o); tone("square", 70, 25, t, 0.5, 0.18, o);
+      hiss(t, 0.25, 0.8, o, { type: "lowpass", f0: 5000, f1: 400 });
+      hiss(t + 0.05, 1.6, 0.4, o, { type: "lowpass", f0: 1200, f1: 120, attack: 0.03 });
+      for (let i = 0; i < 10; i++) hiss(t + 0.15 + Math.random() * 1.0, 0.02, 0.1 + Math.random() * 0.15, o, { type: "highpass", f0: 2000 + Math.random() * 3000 });
+    },
   };
   function play(name, ...a) { if (ac && on && S[name]) S[name](...a); }
   // sons contínuos: feixe laser, zumbido da carga, jatos de voo
@@ -264,7 +316,7 @@ const SFX = (() => {
     const noise = (dest) => { const n = ac.createBufferSource(); n.buffer = noiseBuf; n.loop = true; n.connect(dest); n.start(t, Math.random()); nodes.push(n); return n; };
     if (name === "laser") {
       // zumbido elétrico: serras desafinadas → filtro → tremolo rápido; chiado extra quando o feixe acerta
-      const f = ac.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 1200; f.Q.value = 0.9;
+      const f = L.f = ac.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 1200; f.Q.value = 0.9;
       const trem = ac.createGain(); trem.gain.value = 0.7; f.connect(trem); trem.connect(out);
       osc("sawtooth", 110, f); osc("sawtooth", 167, f); osc("square", 55, f);
       const lfo = osc("sine", 31, ac.createGain()); const lg = ac.createGain(); lg.gain.value = 0.35; lfo.disconnect(); lfo.connect(lg); lg.connect(trem.gain);
@@ -516,13 +568,20 @@ function rayHit(ox, oy, dx, dy, r) {
 }
 
 // ---------------------------------------------------------------- inimigos
-function hitEnemy(e, dmg, kx, ky) {
-  e.hp -= dmg; e.vx += kx; e.vy += ky; e.flash = 0.1; e.squash = 0.15;
+function hitEnemy(e, dmg, kx, ky, stagger = false) {
+  const heavy = e.type === "trooper";
+  e.hp -= dmg; e.vx += kx * (heavy ? 0.35 : 1); e.vy += ky * (heavy ? 0.2 : 1); e.flash = 0.1; e.squash = 0.15;
   floats.push({ x: e.x + rand(-10, 10), y: e.y - e.h - 10, v: Math.round(dmg), t: 0.8, big: dmg > 30 });
+  if (heavy) {
+    if (stagger && e.hp > 0 && e.state !== "stagger") { e.state = "stagger"; e.st = 0; SFX.loopStop("cannon" + e.home, 0.05); }
+    if (e.hp <= 0) trooperDie(e);
+    return;
+  }
   if (e.hp <= 0) { e.dead = 2.8; e.dissolve = 0.75; addTrauma(0.25); SFX.play("dissolve"); }
 }
 function updateEnemies(dt) {
   for (const e of enemies) {
+    if (e.type === "trooper") { updateTrooper(e, dt); continue; }
     if (e.dissolve > 0) {
       e.dissolve -= dt;
       // frente de dissolução a subir: cinzas e brasas a soltar-se
@@ -547,6 +606,219 @@ function updateEnemies(dt) {
   floats = floats.filter(f => (f.t -= dt) > 0);
 }
 const enemyAlive = e => e.dead <= 0;
+
+
+// ---------------------------------------------------------------- Soldado de Choque (inimigo)
+// patrulha → persegue em corrida pesada → ajoelha e aponta (aviso: mira laranja + carga no cano)
+// → 3 disparos do canhão de choque → arrefece. O soco de energia devolve os projéteis; o laser
+// nível 2+ destrói-os; o soco de energia e o laser máximo atordoam-no.
+const bolts = [];
+function trooperMuzzle(e) { return { x: e.x + (TR.muzzleAim.x - e.recoil) * e.facing, y: e.y + TR.muzzleAim.y }; }
+function updateTrooper(e, dt) {
+  e.flash = Math.max(e.flash - dt, 0); e.squash = Math.max(e.squash - dt, 0); e.recoil = Math.max(0, e.recoil - dt * 40);
+  if (e.dead > 0) { trooperDeathUpdate(e, dt); return; }
+  e.st += dt; e.anim += dt; e.cd -= dt;
+  const dx = k.x - e.x, adx = Math.abs(dx);
+  const sees = !k.dead && adx < 580 && Math.abs(k.y - e.y) < 280;
+  let target = 0;
+  switch (e.state) {
+    case "patrol":
+      target = 45 * e.pdir; e.facing = e.pdir;
+      if ((e.x - e.home) * e.pdir > 130) e.pdir = -e.pdir;
+      if (sees) { e.state = "chase"; e.st = 0; }
+      break;
+    case "chase":
+      e.facing = Math.sign(dx) || e.facing;
+      target = adx > 320 ? 105 * e.facing : 0;
+      if (adx <= 440 && e.cd <= 0 && e.onFloor) { e.state = "aim"; e.st = 0; SFX.play("cannonCharge"); }
+      if (!sees && e.st > 2) { e.state = "patrol"; e.st = 0; }
+      break;
+    case "aim": {
+      const m = trooperMuzzle(e);
+      if (Math.random() < 0.8) orbitIn("sparkHot", () => trooperMuzzle(e), 1, 30, 0.16, 1.6);
+      light(m.x, m.y, 60 + e.st * 140, PAL.ember, 0.4 + e.st);
+      if (e.st >= 0.75) { e.state = "fire"; e.st = 0; e.shots = 0; }
+      break;
+    }
+    case "fire":
+      if (e.shots < 3 && e.st >= e.shots * 0.16) { fireBolt(e); e.shots++; }
+      if (e.st >= 0.7) { e.state = "cool"; e.st = 0; }
+      break;
+    case "cool":
+      if (Math.random() < 0.3) { const m = trooperMuzzle(e); emit("smoke", m.x, m.y, e.facing * 20, -30, 0.9, 4, 14, "front"); }
+      if (e.st >= 0.55) { e.state = "chase"; e.st = 0; e.cd = 1.5 + Math.random() * 0.6; }
+      break;
+    case "stagger":
+      if (Math.random() < 0.4) spray("sparkHot", e.x + rand(-14, 14), e.y - rand(40, 110), 1, { speed: 160, life: 0.3, size: 1.5 });
+      if (e.st >= 0.5) { e.state = "chase"; e.st = 0; e.cd = Math.max(e.cd, 0.6); }
+      break;
+  }
+  e.vx = approach(e.vx, target, 700 * dt);
+  e.vy = Math.min(e.vy + 1400 * dt, 900);
+  moveAndSlide(e, e.w, e.h, dt);
+  // passos pesados: pó e baque (mais alto quanto mais perto do Kane)
+  if (Math.abs(e.vx) > 40 && e.onFloor) {
+    e.stepT += dt;
+    if (e.stepT > (Math.abs(e.vx) > 80 ? 0.3 : 0.45)) {
+      e.stepT = 0;
+      for (let i = 0; i < 3; i++) emit("dust", e.x - 12 * e.facing, e.y - 3, -e.facing * rand(30, 90), rand(-30, -8), rand(0.4, 0.6), rand(6, 9), 16, "back");
+      SFX.play("heavyStep", clamp(1 - adx / 700, 0.05, 1));
+      if (adx < 300) addTrauma(0.04);
+    }
+  }
+  // mochila a fumegar e a soltar faíscas
+  e.smokeT += dt;
+  if (e.smokeT > 0.14) {
+    e.smokeT = 0;
+    const ex = e.x + TR.exhaust.x * e.facing, ey = e.y + TR.exhaust.y + (e.state === "aim" || e.state === "fire" || e.state === "cool" ? 48 : 0);
+    emit("smoke", ex, ey, rand(-10, 10) - e.facing * 10, rand(-50, -30), rand(0.8, 1.3), 4, 16, "back");
+    if (Math.random() < 0.25) emit("ember", ex, ey, rand(-30, 30), rand(-90, -40), 0.5, 2, 1, "front");
+  }
+}
+function fireBolt(e) {
+  const m = trooperMuzzle(e);
+  let ang = Math.atan2((k.y - 60) - m.y, k.x - m.x);
+  const base = e.facing > 0 ? 0 : Math.PI;
+  let d = Math.atan2(Math.sin(ang - base), Math.cos(ang - base));
+  ang = base + clamp(d, -0.5, 0.5);
+  bolts.push({ x: m.x, y: m.y, vx: Math.cos(ang) * 560, vy: Math.sin(ang) * 560, owner: "enemy", life: 2.4, dmg: 12 });
+  e.recoil = 7;
+  ring({ x: m.x, y: m.y, r0: 4, r1: 34, hex: PAL.gold, width: 5, dur: 0.16 });
+  spray("sparkHot", m.x, m.y, 12, { speed: 420, dir: ang, spread: 0.9, life: 0.25, size: 2 });
+  emit("smoke", m.x, m.y, Math.cos(ang) * 60, -20, 0.8, 6, 18, "front");
+  light(m.x, m.y, 200, PAL.ember, 1.2);
+  addTrauma(clamp(0.18 - Math.abs(k.x - e.x) / 3000, 0.03, 0.18));
+  SFX.play("cannon");
+}
+function boltExplode(b) {
+  const hex = b.owner === "kane" ? PAL.cyan : PAL.ember;
+  ring({ x: b.x, y: b.y, r0: 4, r1: 40, hex, width: 5, dur: 0.22 });
+  spray(b.owner === "kane" ? "sparkCyan" : "sparkHot", b.x, b.y, 14, { speed: 340, life: 0.35, size: 2 });
+  emit("smoke", b.x, b.y, 0, -30, 0.9, 6, 20, "front");
+  light(b.x, b.y, 160, hex, 1);
+  SFX.play("boltHit");
+}
+function distToBeam(px, py, bm) {
+  const t = clamp((px - bm.ox) * bm.dx + (py - bm.oy) * bm.dy, 0, bm.len);
+  return Math.hypot(px - (bm.ox + bm.dx * t), py - (bm.oy + bm.dy * t));
+}
+function updateBolts(dt) {
+  const fist = k.action === "punch" && k.t >= C.punchWindup * 0.4 && k.t < C.punchWindup + C.punchActive + 0.06 ? local({ x: PT.fistPunch.x, y: PT.fistPunch.y }) : null;
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    const b = bolts[i];
+    b.life -= dt; b.x += b.vx * dt; b.y += b.vy * dt;
+    const kaneBolt = b.owner === "kane";
+    emit(kaneBolt ? "sparkCyan" : "sparkHot", b.x, b.y, -b.vx * 0.2 + rand(-40, 40), -b.vy * 0.2 + rand(-40, 40), 0.18, 1.6, 0.4, "front");
+    light(b.x, b.y, 90, kaneBolt ? PAL.cyan : PAL.ember, 0.8);
+    let gone = b.life <= 0;
+    if (!gone && solids.some(s => b.x > s.x && b.x < s.x + s.w && b.y > s.y && b.y < s.y + s.h)) { boltExplode(b); scorch(b.x, b.y, 0, 1); gone = true; }
+    if (!gone && !kaneBolt) {
+      // soco (normal ou de energia) na trajetória devolve o projétil
+      if (fist && Math.hypot(b.x - fist.x, b.y - fist.y) < (k.energy ? 60 : 40)) {
+        b.owner = "kane"; b.vx = k.facing * 760; b.vy = rand(-40, 40); b.dmg = k.energy ? 45 : 28; b.life = 2;
+        ring({ x: b.x, y: b.y, r0: 4, r1: 46, hex: PAL.cyan, width: 5, dur: 0.2 }); hitstop = Math.max(hitstop, 0.05);
+        SFX.play("reflect"); floats.push({ x: b.x, y: b.y - 20, v: "DEVOLVIDO!", t: 0.8, t0: 0.8, big: true, col: PAL.cyanSoft });
+        continue;
+      }
+      // laser nível 2+ desfaz projéteis no caminho
+      if (k.beam && k.laserLevel >= 2 && distToBeam(b.x, b.y, k.beam) < 10 * C.laserLevels[k.laserLevel - 1].width) { boltExplode(b); gone = true; }
+      else if (!k.dead && k.invuln <= 0 && overlap({ x: b.x - 6, y: b.y - 6, w: 12, h: 12 }, bodyRect(k, C.bodyW + 6, k.kneel > 0.5 ? 70 : C.bodyH))) {
+        boltExplode(b); hurtKane(b.dmg, Math.sign(b.vx)); gone = true;
+      }
+    }
+    if (!gone && kaneBolt) {
+      for (const e of enemies) if (enemyAlive(e) && overlap({ x: b.x - 8, y: b.y - 8, w: 16, h: 16 }, bodyRect(e, e.w, e.h))) {
+        boltExplode(b); hitEnemy(e, b.dmg, Math.sign(b.vx) * 260, -60, true); gone = true; break;
+      }
+    }
+    if (gone) bolts.splice(i, 1);
+  }
+}
+function drawBolts() {
+  ADD();
+  for (const b of bolts) {
+    const a = Math.atan2(b.vy, b.vx), kb = b.owner === "kane";
+    const outer = kb ? PAL.cyan : PAL.ember, mid = kb ? PAL.cyanSoft : PAL.gold;
+    ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(a);
+    ctx.globalAlpha = 0.7; ctx.drawImage(glowTex(outer), -70, -16, 84, 32);
+    ctx.globalAlpha = 1; ctx.drawImage(glowTex(mid, true), -36, -7, 48, 14);
+    ctx.fillStyle = "#ffffff"; ctx.globalAlpha = 1; ctx.fillRect(-14, -2, 20, 4);
+    ctx.restore();
+    glow(b.x, b.y, 22, outer, 0.8); glow(b.x, b.y, 7, PAL.white, 1, true);
+  }
+  // aviso de mira dos soldados a apontar
+  for (const e of enemies) if (e.type === "trooper" && e.dead <= 0 && e.state === "aim") {
+    const m = trooperMuzzle(e), t = e.st / 0.75;
+    let ang = Math.atan2((k.y - 60) - m.y, k.x - m.x);
+    const base = e.facing > 0 ? 0 : Math.PI, d = Math.atan2(Math.sin(ang - base), Math.cos(ang - base));
+    ang = base + clamp(d, -0.5, 0.5);
+    ctx.globalAlpha = 0.25 + 0.5 * t; ctx.strokeStyle = PAL.ember; ctx.lineWidth = 1 + t; ctx.setLineDash([5, 7]); ctx.lineDashOffset = time * 60;
+    ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(m.x + Math.cos(ang) * 600, m.y + Math.sin(ang) * 600); ctx.stroke(); ctx.setLineDash([]);
+    glow(m.x, m.y, 10 + t * 22, PAL.ember, 0.6 + 0.4 * t); glow(m.x, m.y, 4 + t * 6, PAL.white, t, true);
+  }
+  NORMAL();
+}
+function trooperDie(e) {
+  e.dead = 7.5; e.deathT = 0; e.vx = Math.sign(e.vx || -e.facing) * 60;
+  SFX.play("zap"); addTrauma(0.2);
+  spray("sparkHot", e.x, e.y - 80, 20, { speed: 380, life: 0.4, size: 2 });
+}
+function trooperDeathUpdate(e, dt) {
+  const t0 = e.deathT; e.deathT += dt; e.dead -= dt;
+  const at = t => t0 < t && e.deathT >= t;
+  e.vx = approach(e.vx, 0, 300 * dt); e.vy = Math.min(e.vy + 1400 * dt, 900); moveAndSlide(e, e.w, 40, dt);
+  if (at(0.13)) { spray("sparkHot", e.x - 10 * e.facing, e.y - 70, 16, { speed: 320, life: 0.35, size: 2 }); SFX.play("zap"); light(e.x, e.y - 70, 160, PAL.gold, 1); }
+  if (at(0.27)) {                                    // explosão principal
+    const cx = e.x, cy = e.y - 60;
+    ring({ x: cx, y: cy, r0: 10, r1: 170, hex: PAL.ember, width: 9, dur: 0.45 });
+    ring({ x: cx, y: cy, r0: 6, r1: 80, hex: PAL.white, width: 6, dur: 0.2 });
+    ring({ x: cx, y: e.y, r0: 10, r1: 200, flat: 0.18, hex: PAL.gold, width: 5, dur: 0.5 });
+    spray("orbRed", cx, cy, 10, { speed: 200, life: 0.45, size: 40, size1: 6 });
+    spray("sparkHot", cx, cy, 50, { speed: 620, life: 0.6, size: 2.4 });
+    spray("debris", cx, cy, 22, { speed: 520, dir: -Math.PI / 2, spread: 2.6, life: 1.4, size: 4 });
+    for (let i = 0; i < 18; i++) emit("smoke", cx + rand(-30, 30), cy + rand(-30, 30), rand(-120, 120), rand(-160, -20), rand(1.2, 2), rand(10, 16), 40, "front");
+    for (let i = 0; i < 20; i++) emit("ember", cx, cy, rand(-260, 260), rand(-320, -60), rand(0.8, 1.6), 2.5, 1, "front");
+    light(cx, cy, 420, PAL.ember, 1.6); flash(0.3, PAL.ember); zoomKick(0.05); addTrauma(0.6);
+    scorch(e.x, e.y, 0, 1); scorch(e.x - 10, e.y, 0, 1); scorch(e.x + 10, e.y, 0, 1);
+    SFX.play("explosion");
+  }
+  if (at(0.45)) { spray("sparkHot", e.x + 20, e.y - 40, 10, { speed: 260, life: 0.3, size: 2 }); SFX.play("zap"); }
+  if (e.deathT > 0.6 && e.dead > 1 && Math.random() < 0.2) {        // destroços a fumegar
+    emit("smoke", e.x + rand(-20, 20), e.y - 12, rand(-10, 10), rand(-50, -25), rand(1, 1.6), 5, 20, "back");
+    if (Math.random() < 0.3) emit("ember", e.x + rand(-20, 20), e.y - 10, rand(-20, 20), rand(-80, -30), 0.6, 2, 1, "front");
+  }
+  if (e.deathT > 0.6 && e.dead > 1) light(e.x, e.y - 10, 70, PAL.ember, 0.4 + 0.2 * Math.sin(time * 9));
+  if (e.dead <= 0) Object.assign(e, { dead: 0, hp: e.maxHp, x: e.home, y: FLOOR_Y, vx: 0, vy: 0, state: "patrol", st: 0, cd: 1.5 });
+}
+function trooperFrame(e) {
+  if (e.dead > 0) return [2, Math.min(4, Math.floor(e.deathT / 0.13))];
+  if (e.state === "aim" || e.state === "fire" || e.state === "cool") return [0, 1];
+  if (Math.abs(e.vx) > 30) return [1, Math.floor(e.anim * (Math.abs(e.vx) > 80 ? 9 : 6)) % 4];
+  return [0, 0];
+}
+function drawTrooper(e) {
+  if (!TROOPER.naturalWidth) return;
+  const [row, col] = trooperFrame(e);
+  const sq = e.squash / 0.15, breathe = row === 0 && col === 0 ? Math.sin(e.anim * 2) * 0.012 : 0;
+  const fade = e.dead > 0 && e.dead < 1 ? e.dead : 1;
+  ctx.save();
+  ctx.translate(e.x - e.recoil * e.facing + (e.state === "stagger" ? rand(-2, 2) : 0), e.y);
+  ctx.scale(e.facing * (1 + sq * 0.1), 1 - sq * 0.08 + breathe);
+  ctx.globalAlpha = fade;
+  ctx.drawImage(TROOPER, col * FW, row * FH, FW, FH, -OX, -OY, FW, FH);
+  ADD();
+  if (e.flash > 0) { ctx.globalAlpha = 0.85 * fade; ctx.drawImage(tinted("#ffffff", TROOPER), col * FW, row * FH, FW, FH, -OX, -OY, FW, FH); }
+  if (e.state === "fire" && e.st < 0.45) { ctx.globalAlpha = 0.25; ctx.drawImage(tinted(PAL.ember, TROOPER), col * FW, row * FH, FW, FH, -OX, -OY, FW, FH); }   // iluminado pelo disparo
+  if (e.dead <= 0) {
+    const v = row === 0 && col === 1 ? TR.visorAim : row === 0 ? TR.visorStand : { x: 18, y: -98 };
+    glow(v.x, v.y, 12, "#ff7a2a", 0.55 + 0.2 * Math.sin(time * 4 + e.home));
+  }
+  ctx.restore(); NORMAL();
+  if (e.dead <= 0 && e.hp < e.maxHp) {
+    ctx.fillStyle = "#000a"; ctx.fillRect(e.x - 26, e.y - e.h - 22, 52, 6);
+    ctx.fillStyle = "#ff8a3d"; ctx.fillRect(e.x - 26, e.y - e.h - 22, 52 * Math.max(e.hp, 0) / e.maxHp, 6);
+  }
+}
 
 // ---------------------------------------------------------------- Kane: pontos no mundo
 // ponto do sprite → mundo, com a mesma rotação do corpo usada no desenho
@@ -588,18 +860,25 @@ function aimDir(inp) {
   if (inp.y > 0.5 && !k.onFloor) return { dx: k.facing * Math.SQRT1_2, dy: Math.SQRT1_2 };
   return { dx: k.facing, dy: 0 };
 }
-function castLaser(ox, oy, dx, dy) {
-  let best = C.laserRange, target = null, nx = 0, ny = 0;
-  for (const s of solids) { const h = rayHit(ox, oy, dx, dy, s); if (h && h.t < best) { best = h.t; target = null; nx = h.nx; ny = h.ny; } }
-  for (const e of enemies) if (enemyAlive(e)) { const h = rayHit(ox, oy, dx, dy, bodyRect(e, e.w, e.h)); if (h && h.t < best) { best = h.t; target = e; nx = h.nx; ny = h.ny; } }
-  return { ox, oy, dx, dy, len: best, ex: ox + dx * best, ey: oy + dy * best, hit: best < C.laserRange, target, nx, ny };
+function castLaser(ox, oy, dx, dy, pierce = false) {
+  let best = C.laserRange, nx = 0, ny = 0;
+  for (const s of solids) { const h = rayHit(ox, oy, dx, dy, s); if (h && h.t < best) { best = h.t; nx = h.nx; ny = h.ny; } }
+  const hits = [];
+  for (const e of enemies) if (enemyAlive(e)) { const h = rayHit(ox, oy, dx, dy, bodyRect(e, e.w, e.h)); if (h && h.t < best) hits.push({ e, h }); }
+  hits.sort((a, b) => a.h.t - b.h.t);
+  let targets = hits.map(q => q.e);
+  if (!pierce && hits.length) { best = hits[0].h.t; nx = hits[0].h.nx; ny = hits[0].h.ny; targets = [hits[0].e]; }
+  // nível máximo atravessa os inimigos e só para na parede
+  return { ox, oy, dx, dy, len: best, ex: ox + dx * best, ey: oy + dy * best, hit: best < C.laserRange, target: targets[0] || null, targets, nx, ny, pierce };
 }
 
 function updateKane(dt) {
   if (k.dead) { k.vy = Math.min(k.vy + C.gravity * dt, C.maxFall); k.vx = approach(k.vx, 0, C.groundFriction * dt); moveAndSlide(k, C.bodyW, C.bodyH, dt); return; }
-  const inp = inputVec();
-  if (pressed("jump")) k.jumpBuf = C.jumpBuffer;
-  if (pressed("fly")) setFlying(!k.flying);
+  updateExhaustion(dt);
+  const locked = k.exhausted || k.kneel > 0.3;     // ajoelhado: sem controlo até recuperar
+  const inp = locked ? { x: 0, y: 0 } : inputVec();
+  if (!locked && pressed("jump")) k.jumpBuf = C.jumpBuffer;
+  if (!locked && pressed("fly")) setFlying(!k.flying);
   if (k.action === "none" || k.action === "charge") {
     const f = inp.x > 0.1 ? 1 : inp.x < -0.1 ? -1 : k.facing;
     if (f !== k.facing) {
@@ -616,8 +895,9 @@ function updateKane(dt) {
   const wasFloor = k.onFloor, fallSpeed = k.vy;
   k.t += dt; k.beam = null;
   if (k.action === "none") {
-    if (pressed("laser") && k.fury >= C.laserMinFury) { start("laser"); k.laserTick = 0; k.lastBeam = null; k.laserSound = false; SFX.play("laserStart"); }
-    else if (pressed("punch")) { start("charge"); SFX.loopStart("charge"); }
+    if (!locked && pressed("laser") && k.fury >= C.laserMinFury) {
+      start("laser"); k.laserTick = 0; k.lastBeam = null; k.laserSound = false; k.laserHold = 0; k.laserLevel = 1; SFX.play("laserStart");
+    } else if (!locked && pressed("punch")) { start("charge"); SFX.loopStart("charge"); }
   } else if (k.action === "charge") {
     chargeFx(dt);
     if (!held.punch) {
@@ -635,7 +915,7 @@ function updateKane(dt) {
     else if (k.t >= C.punchWindup + C.punchActive + C.punchRecovery) start("none");
   } else if (k.action === "laser") {
     const eye = eyeWorld(), dir = aimDir(inp);
-    k.aim = castLaser(eye.x, eye.y, dir.dx, dir.dy);
+    k.aim = castLaser(eye.x, eye.y, dir.dx, dir.dy, C.laserLevels[k.laserLevel - 1].pierce);
     if (!held.laser || k.fury <= 0) {
       start("none");
       if (k.lastBeam) { laserEndFx(eye); SFX.loopStop("laser", 0.08); SFX.play("laserEnd"); }
@@ -645,7 +925,7 @@ function updateKane(dt) {
   if (k.action !== "laser") k.aim = null;
 
   // locomoção
-  const mult = { laser: C.laserMoveMult, punch: 0, charge: 0.5 }[k.action] ?? 1;
+  const mult = ({ laser: C.laserMoveMult, punch: 0, charge: 0.5 }[k.action] ?? 1) * (k.weak ? 0.8 : 1);
   let jumped = false;
   if (k.flying) {
     const tx = inp.x * C.flightSpeed * mult, ty = inp.y * C.flightSpeed * mult;
@@ -667,21 +947,64 @@ function updateKane(dt) {
   moveAndSlide(k, C.bodyW, C.bodyH, dt);
   if (k.y < 70) { k.y = 70; k.vy = Math.max(k.vy, 0); }
 
-  if (k.action !== "laser") setFury(k.fury + C.furyRegen * dt);
+  if (k.action !== "laser") setFury(k.fury + C.furyRegen * dt * (k.exhausted ? C.kneelRegen : 1));
   k.anim += dt;
   updateAnimState();
   movementFx(dt, wasFloor, fallSpeed, jumped);
   ambientFx(dt);
 
   const kr = bodyRect(k, C.bodyW, C.bodyH);
-  for (const e of enemies) if (enemyAlive(e) && k.invuln <= 0 && overlap(kr, bodyRect(e, e.w, e.h))) {
-    k.hp = Math.max(0, k.hp - 10); k.invuln = C.invuln; k.hurtFlash = 0.25;
-    k.vx = Math.sign(k.x - e.x || 1) * 260; k.vy = -220;
-    start("none"); addTrauma(0.35, Math.sign(k.x - e.x) * 6, 0); flash(0.25, PAL.red);
-    SFX.play("hurt"); SFX.loopStop("charge", 0.05); SFX.loopStop("laser", 0.05);
-    spray("sparkHot", k.x, k.y - 60, 14, { speed: 300, life: 0.35, size: 2 });
-    if (k.hp <= 0) { k.dead = true; k.flying = false; SFX.loopStop("flight"); setTimeout(respawn, 1500); }
+  for (const e of enemies) if (enemyAlive(e) && k.invuln <= 0 && overlap(kr, bodyRect(e, e.w, e.h))) hurtKane(10, Math.sign(k.x - e.x || 1));
+}
+function hurtKane(dmg, dir) {
+  if (k.invuln > 0 || k.dead) return;
+  k.hp = Math.max(0, k.hp - dmg); k.invuln = C.invuln; k.hurtFlash = 0.25;
+  k.vx = dir * 260; k.vy = k.exhausted ? 0 : -220;
+  if (!k.exhausted) start("none");
+  addTrauma(0.35, dir * 6, 0); flash(0.25, PAL.red);
+  SFX.play("hurt"); SFX.loopStop("charge", 0.05); SFX.loopStop("laser", 0.05);
+  spray("sparkHot", k.x, k.y - 60, 14, { speed: 300, life: 0.35, size: 2 });
+  if (k.hp <= 0) { k.dead = true; k.flying = false; SFX.loopStop("flight"); setTimeout(respawn, 1500); }
+}
+
+// ---------------------------------------------------------------- exaustão: perder forças e ajoelhar
+function updateExhaustion(dt) {
+  k.weak = !k.exhausted && k.fury < C.weakAt;
+  if (!k.exhausted && k.fury <= 0.5) {
+    k.exhausted = true; k.kneelLanded = false;
+    if (k.action === "laser" && k.lastBeam) { laserEndFx(eyeWorld()); }
+    SFX.loopStop("laser", 0.3); SFX.loopStop("charge", 0.1); start("none");
+    if (k.flying) setFlying(false);                 // sem energia deixa de voar e cai
+    SFX.play("powerDown");
+    floats.push({ x: k.x, y: k.y - 150, v: "EXAUSTO", t: 1.4, t0: 1.4, big: true, col: "#ff6a5c" });
+    spray("sparkRed", k.x + 12 * k.facing, k.y - 110, 12, { speed: 140, life: 0.4, size: 1.5 });
   }
+  if (k.exhausted && k.fury >= C.recoverAt) {
+    k.exhausted = false;
+    SFX.play("powerUp");
+    ring({ x: k.x, y: k.y - 60, r0: 10, r1: 80, hex: PAL.red, width: 5, dur: 0.35 });
+    spray("orbRed", k.x, k.y - 60, 8, { speed: 140, life: 0.35, size: 14, size1: 2 });
+  }
+  const target = k.exhausted && k.onFloor ? 1 : 0;
+  k.kneel = target > k.kneel ? Math.min(1, k.kneel + dt / 0.45) : Math.max(0, k.kneel - dt / 0.35);
+  if (k.kneel >= 1 && !k.kneelLanded) {           // joelho bate no chão
+    k.kneelLanded = true;
+    SFX.play("kneelThud"); addTrauma(0.18, 0, 3);
+    for (let i = 0; i < 10; i++) { const s = i % 2 ? -1 : 1; emit("dust", k.x + 18 * k.facing + s * 6, k.y - 3, s * rand(60, 160), rand(-40, -10), rand(0.5, 0.8), rand(7, 10), 18, "back"); }
+  }
+  if (k.kneel > 0.5) {                             // ajoelhado: vapor da armadura, visor a falhar, arfar
+    if (Math.random() < 0.12) emit("steam", k.x + rand(-14, 14), k.y - rand(50, 90), rand(-10, 10), rand(-40, -20), rand(0.8, 1.2), 5, 20, "front");
+    if (Math.random() < 0.05) { const e = kneelPoint(PT.eyeGuard); spray("sparkRed", e.x, e.y, 3, { speed: 90, life: 0.25, size: 1.2 }); }
+    k.pantT += dt;
+    if (k.pantT > 0.75) { k.pantT = 0; SFX.play("pant"); }
+  }
+  if (k.weak && Math.random() < 0.03) emit("steam", k.x + rand(-10, 10), k.y - rand(70, 100), 0, -30, 0.8, 4, 14, "front");
+}
+// ponto do sprite com a pose de joelhos aplicada (para o visor e partículas)
+function kneelPoint(p) {
+  const kp = easeInOut(k.kneel), HIP = -54, drop = -HIP * 0.52 * kp, a = 0.46 * kp;
+  const dx = p.x, dy = p.y - HIP, c = Math.cos(a), sn = Math.sin(a);
+  return { x: k.x + (dx * c - dy * sn - 4 * kp) * k.facing, y: k.y + HIP + drop + dx * sn + dy * c };
 }
 function respawn() { Object.assign(k, { x: 320, y: FLOOR_Y, vx: 0, vy: 0, hp: C.maxHp, fury: C.maxFury, dead: false, invuln: 1, action: "none" }); }
 
@@ -697,6 +1020,7 @@ function updateAnimState() {
 }
 // [linha, coluna, pose]
 function kaneFrame() {
+  if (k.kneel > 0.01) return [ROW.punch, 0, "kneel"];
   if (k.action === "laser" || k.action === "charge") return [ROW.punch, 0, "attack"];
   if (k.action === "punch") {
     const t = k.t, w = C.punchWindup, a = C.punchActive, r = C.punchRecovery;
@@ -879,21 +1203,37 @@ function laserWindupFx(eye, dt) {
 }
 function fireLaser(dt) {
   const b = k.aim;
+  k.laserHold += dt;
+  const lvl = k.laserHold >= C.laserLevels[2].at ? 3 : k.laserHold >= C.laserLevels[1].at ? 2 : 1;
+  if (lvl > k.laserLevel) laserLevelUp(lvl);
+  const LV = C.laserLevels[k.laserLevel - 1];
+  b.level = k.laserLevel;
   k.beam = b; k.lastBeam = b; k.beamFade = 0.14;
   if (!k.laserSound) { k.laserSound = true; SFX.loopStart("laser"); }
   SFX.loopSet("laser", (L, t) => {
-    L.sizzle.gain.setTargetAtTime(b.hit ? 0.55 : 0.05, t, 0.03);
-    L.nodes[0].frequency.setTargetAtTime(110 + Math.random() * 8, t, 0.02);
+    L.sizzle.gain.setTargetAtTime(b.hit ? 0.4 + 0.15 * k.laserLevel : 0.05, t, 0.03);
+    L.nodes[0].frequency.setTargetAtTime(95 + k.laserLevel * 30 + Math.random() * 8, t, 0.05);
+    L.f.frequency.setTargetAtTime(900 + k.laserLevel * 700, t, 0.08);
+    L.out.gain.setTargetAtTime(0.22 + k.laserLevel * 0.07, t, 0.08);
   });
-  if (b.target) {
+  if (b.targets.length) {
     k.laserTick += dt;
     if (k.laserTick >= C.laserTick) {
       k.laserTick -= C.laserTick;
-      hitEnemy(b.target, C.laserDps * C.laserTick, b.dx * C.laserKnock, b.dy * C.laserKnock);
-      b.target.flash = 0.035;   // pisca em vez de ficar branco o tempo todo
+      for (const e of b.targets) {
+        hitEnemy(e, C.laserDps * C.laserTick * LV.dmg, b.dx * C.laserKnock * LV.knock, b.dy * C.laserKnock * LV.knock, k.laserLevel >= 3);
+        e.flash = 0.035;   // pisca em vez de ficar branco o tempo todo
+      }
     }
   }
-  setFury(k.fury - C.laserFuryPerSec * dt);
+  setFury(k.fury - LV.drain * dt);
+  if (k.laserLevel >= 3 && k.onFloor) {               // recuo: o feixe empurra o Kane para trás
+    k.vx -= k.facing * 260 * dt;
+    if (Math.random() < 0.4) emit("dust", k.x - 6 * k.facing, k.y - 3, -k.facing * rand(40, 100), rand(-30, -8), 0.5, 6, 12, "back");
+  }
+  if (k.laserLevel >= 2 && Math.random() < 0.25 * k.laserLevel) {   // energia a escapar do corpo
+    emit("ember", k.x + rand(-16, 16), k.y - rand(30, 120), rand(-20, 20), rand(-90, -40), rand(0.4, 0.8), 2, 1, "front");
+  }
   // impacto: faíscas refletidas pela normal, metal derretido, fumo, marca de queimado
   if (b.hit) {
     const rx = b.dx - 2 * (b.dx * b.nx + b.dy * b.ny) * b.nx, ry = b.dy - 2 * (b.dx * b.nx + b.dy * b.ny) * b.ny;
@@ -903,16 +1243,28 @@ function fireLaser(dt) {
     if (Math.random() < 0.25) emit("smoke", b.ex + b.nx * 6, b.ey + b.ny * 6, rand(-20, 20) + b.nx * 30, rand(-60, -30), rand(0.8, 1.3), rand(6, 10), 26, "front");
     if (Math.random() < 0.3) emit("ember", b.ex, b.ey, rand(-80, 80), rand(-160, -40), rand(0.4, 0.8), 2, 1, "front");
     if (!b.target) scorch(b.ex, b.ey, b.nx, b.ny);
-    light(b.ex, b.ey, 150, PAL.red, 1.1);
+    light(b.ex, b.ey, 150 + 60 * k.laserLevel, LV.outer, 1.1);
+    if (k.laserLevel >= 2) spray("sparkHot", b.ex, b.ey, k.laserLevel, { speed: 650, dir: refl, spread: 1.2, life: 0.45, size: 2.4 });
   }
   const eye = { x: b.ox, y: b.oy };
-  light(eye.x, eye.y, 110, PAL.red, 0.9);
+  light(eye.x, eye.y, 110 + 50 * k.laserLevel, LV.outer, 0.9);
   // energia a escorrer ao longo do feixe
   if (Math.random() < 0.6) {
     const u = Math.random() * b.len;
     emit("sparkRed", b.ox + b.dx * u, b.oy + b.dy * u, b.dx * 300 + rand(-40, 40), b.dy * 300 + rand(-40, 40), 0.15, 1.2, 0.4, "front");
   }
-  addTrauma(0.02);
+  addTrauma(0.012 + 0.012 * k.laserLevel);
+}
+function laserLevelUp(lvl) {
+  k.laserLevel = lvl;
+  const e = eyeWorld(), LV = C.laserLevels[lvl - 1];
+  ring({ x: e.x, y: e.y, r0: 6, r1: 50 + lvl * 25, hex: LV.mid, width: 6, dur: 0.3 });
+  ring({ x: k.x, y: k.y - 60, r0: 20, r1: 110 + lvl * 30, hex: LV.outer, width: 4, dur: 0.45 });
+  spray("sparkHot", e.x, e.y, 14 + lvl * 6, { speed: 380, life: 0.4, size: 2 });
+  spray("orbRed", k.x, k.y - 60, 6, { speed: 160, life: 0.35, size: 18, size1: 2 });
+  k.whiteFlash = 0.06; flash(0.12 + lvl * 0.05, LV.mid); zoomKick(0.02 * lvl); addTrauma(0.15 + 0.08 * lvl);
+  floats.push({ x: k.x, y: k.y - 150, v: lvl === 3 ? "LASER MÁX!" : "LASER NV " + lvl, t: 1.1, t0: 1.1, big: true, col: LV.core === "#ffffff" ? "#ffd27a" : LV.core });
+  SFX.play("levelUp", lvl);
 }
 function laserEndFx(eye) {
   spray("sparkRed", eye.x, eye.y, 10, { speed: 160, life: 0.3, size: 1.5 });
@@ -962,6 +1314,7 @@ function drawSolids() {
   }
 }
 function drawEnemy(e) {
+  if (e.type === "trooper") return drawTrooper(e);
   if (e.dead > 0 && e.dissolve <= 0) return;
   ctx.save(); ctx.translate(e.x, e.y);
   const sq = e.squash / 0.15;
@@ -1009,6 +1362,22 @@ function kaneTransform(pose) {
   if (k.dead) ctx.rotate(-1.3);
 }
 function drawSprite(img, row, col, x = -OX, y = -OY) { ctx.drawImage(img, col * FW, row * FH, FW, FH, x, y, FW, FH); }
+// Pose de joelhos gerada a partir da guarda: pernas comprimidas a partir dos pés (joelho dobrado)
+// e tronco a descer, cabeça baixa e a arfar. Transição contínua com k.kneel (0 → 1).
+function drawPose(img, row, col, pose, ox = 0, oy = 0) {
+  if (pose !== "kneel") return drawSprite(img, row, col, -OX + ox, -OY + oy);
+  const kp = easeInOut(k.kneel), HIP = -54, comp = 1 - 0.52 * kp, drop = -HIP * 0.52 * kp;
+  const pant = Math.sin(time * 8.4) * 1.6 * kp;
+  ctx.save(); ctx.scale(1 + 0.14 * kp, comp);
+  ctx.beginPath(); ctx.rect(-OX, HIP - 1, FW, -HIP + 8); ctx.clip();
+  drawSprite(img, row, col, -OX + ox, -OY + oy);
+  ctx.restore();
+  ctx.save(); ctx.translate(-4 * kp, drop + pant * 0.5);
+  ctx.translate(0, HIP); ctx.rotate(0.46 * kp + pant * 0.006); ctx.translate(0, -HIP);
+  ctx.beginPath(); ctx.rect(-OX, -OY - 10, FW, OY + 10 + HIP + 1); ctx.clip();
+  drawSprite(img, row, col, -OX + ox, -OY + oy);
+  ctx.restore();
+}
 
 function drawGhosts() {
   if (!ATLAS.naturalWidth) return;
@@ -1053,27 +1422,46 @@ function drawKaneBack(row, col, pose) {
     for (const [dx, dy] of [[-3, 0], [3, 0], [0, -3], [0, 3], [-2, -2], [2, -2]]) drawSprite(tex, row, col, -OX + dx, -OY + dy);
     glow(PT.fistGuard.x, PT.fistGuard.y, 30 + grow * 40, charged ? PAL.cyan : PAL.red, 0.5 + grow * 0.4);
   }
+  // aura de poder do laser: cresce com o nível (contorno + brilho atrás do corpo)
+  if (k.action === "laser" && k.beam && ATLAS.naturalWidth && k.laserLevel >= 2) {
+    const LV = C.laserLevels[k.laserLevel - 1], lv = k.laserLevel - 1;
+    const tex = tinted(LV.mid), flick = 0.8 + 0.2 * Math.sin(time * 37);
+    ctx.globalAlpha = (0.1 + lv * 0.09) * flick;
+    const d = 2 + lv * 2;
+    for (const [dx, dy] of [[-d, 0], [d, 0], [0, -d], [0, d], [-d, -d], [d, -d]]) drawSprite(tex, row, col, -OX + dx, -OY + dy);
+    glow(0, -70, 70 + lv * 45, LV.outer, (0.25 + lv * 0.2) * flick);
+    if (lv >= 2) glow(0, -70, 160, LV.mid, 0.18 * flick);
+  }
+  // fraqueza: brilho vermelho fraco e intermitente (energia a falhar)
+  if ((k.weak || k.exhausted) && Math.random() < 0.5) glow(0, -70, 50, PAL.red, 0.08);
   ctx.restore(); NORMAL();
 }
 function drawKaneSprite(row, col, pose) {
   ctx.save(); kaneTransform(pose);
   const blink = k.invuln > 0 && Math.floor(k.invuln * 20) % 2;
   ctx.globalAlpha = blink ? 0.45 : 1;
-  drawSprite(ATLAS, row, col);
-  // clarões de cor por cima do sprite (dano = vermelho, impacto = branco)
+  drawPose(ATLAS, row, col, pose);
+  // clarões de cor por cima do sprite (dano = vermelho, impacto = branco, laser forte = brilho quente)
   ADD();
-  if (k.hurtFlash > 0) { ctx.globalAlpha = k.hurtFlash / 0.25 * 0.45; drawSprite(tinted(PAL.red), row, col); }
-  if (k.whiteFlash > 0) { ctx.globalAlpha = 0.9; drawSprite(tinted("#ffffff"), row, col); }
+  if (k.hurtFlash > 0) { ctx.globalAlpha = k.hurtFlash / 0.25 * 0.45; drawPose(tinted(PAL.red), row, col, pose); }
+  if (k.whiteFlash > 0) { ctx.globalAlpha = 0.9; drawPose(tinted("#ffffff"), row, col, pose); }
+  if (k.action === "laser" && k.beam && k.laserLevel >= 2) { ctx.globalAlpha = 0.05 * (k.laserLevel - 1) * (0.7 + 0.3 * Math.sin(time * 29)); drawSprite(tinted(C.laserLevels[k.laserLevel - 1].mid), row, col); }
   ctx.restore(); NORMAL();
 }
 function drawKaneFront(row, col, pose) {
   ctx.save(); kaneTransform(pose);
   ADD();
+  if (pose === "kneel") {                // visor a falhar: fraco e intermitente
+    ctx.restore(); ADD();
+    const e = kneelPoint(PT.eyeGuard), fl = Math.random() < 0.15 ? 0.05 : 0.25 + 0.1 * Math.sin(time * 13);
+    glow(e.x, e.y, 14, PAL.red, fl); glowStretch(e.x, e.y, 22, 3, PAL.pink, fl * 0.6);
+    NORMAL(); return;
+  }
   const eye = row === ROW.punch ? PT.eyeGuard : PT.eyeIdle;
-  // visor sempre aceso (pulsa devagar), muito mais forte no laser
+  // visor sempre aceso (pulsa devagar), muito mais forte no laser; com pouca energia, falha
   const pulse = 0.75 + 0.25 * Math.sin(time * 3);
-  let vis = 0.35 * pulse;
-  if (k.action === "laser") vis = k.beam ? 1.3 : 0.5 + k.t / C.laserWindup;
+  let vis = 0.35 * pulse * (k.weak && Math.random() < 0.2 ? 0.2 : 1);
+  if (k.action === "laser") vis = k.beam ? 1.3 + 0.4 * (k.laserLevel - 1) : 0.5 + k.t / C.laserWindup;
   glow(eye.x, eye.y, 10 + vis * 16, PAL.red, vis);
   glowStretch(eye.x, eye.y, 26 + vis * 30, 4, PAL.pink, vis * 0.8);
   if (row === ROW.idle && !k.dead) {                    // mãos: aura vermelha atrás, energia ciano no punho
@@ -1118,25 +1506,38 @@ function drawLaser() {
   }
   const b = k.beam || (k.beamFade > 0 ? k.lastBeam : null);
   if (b) {
-    const w = k.beam ? Math.min(1, (k.t - C.laserWindup) / 0.06 + 0.2) : k.beamFade / 0.14;   // abre e fecha
+    const lvl = b.level || 1, LV = C.laserLevels[lvl - 1];
+    const open = k.beam ? Math.min(1, (k.t - C.laserWindup) / 0.06 + 0.2) : k.beamFade / 0.14;   // abre e fecha
+    // a largura cresce suavemente com o tempo de disparo (não aos saltos)
+    const grow = k.beam ? lerp(LV.width, (C.laserLevels[lvl] || LV).width, lvl < 3 ? clamp((k.laserHold - LV.at) / ((C.laserLevels[lvl] || LV).at - LV.at + 1e-6), 0, 1) * 0.35 : 0) : LV.width;
+    const w = open * grow;
     const ang = Math.atan2(b.dy, b.dx), L = b.len;
-    const pulse = 1 + 0.12 * Math.sin(time * 70) + rand(-0.06, 0.06);
+    const pulse = 1 + (0.12 + 0.04 * lvl) * Math.sin(time * (70 + lvl * 15)) + rand(-0.06, 0.06) * lvl;
     ctx.save(); ctx.translate(b.ox, b.oy); ctx.rotate(ang);
-    // brilho largo, corpo vermelho, núcleo rosa e branco
-    ctx.globalAlpha = 0.55 * w; ctx.drawImage(glowTex(PAL.red), -24, -44 * w * pulse, L + 48, 88 * w * pulse);
-    ctx.globalAlpha = 1 * w; ctx.drawImage(glowTex(PAL.red, true), -8, -16 * w * pulse, L + 16, 32 * w * pulse);
-    ctx.globalAlpha = 1 * w; ctx.drawImage(glowTex(PAL.pink, true), -5, -7.5 * w * pulse, L + 10, 15 * w * pulse);
-    ctx.globalAlpha = w; ctx.fillStyle = "#ffffff"; ctx.fillRect(0, -2.2 * w, L, 4.4 * w);
-    // hélice de energia a correr ao longo do feixe
-    ctx.lineWidth = 1.4; ctx.lineCap = "round";
-    for (let strand = 0; strand < 2; strand++) {
-      ctx.strokeStyle = strand ? PAL.pink : "#ffffff"; ctx.globalAlpha = 0.75 * w;
+    // brilho largo, corpo, núcleo — as cores aquecem com o nível (vermelho → laranja → branco incandescente)
+    ctx.globalAlpha = Math.min(1, 0.55 * open + 0.1 * lvl); ctx.drawImage(glowTex(LV.outer), -24, -44 * w * pulse, L + 48, 88 * w * pulse);
+    ctx.globalAlpha = open; ctx.drawImage(glowTex(LV.mid, true), -8, -16 * w * pulse, L + 16, 32 * w * pulse);
+    ctx.globalAlpha = open; ctx.drawImage(glowTex(LV.core, true), -5, -7.5 * w * pulse, L + 10, 15 * w * pulse);
+    ctx.globalAlpha = open; ctx.fillStyle = "#ffffff"; ctx.fillRect(0, -2.2 * w, L, 4.4 * w);
+    // hélice de energia a correr ao longo do feixe (mais fitas e mais larga a cada nível)
+    ctx.lineWidth = 1.4 + lvl * 0.4; ctx.lineCap = "round";
+    for (let strand = 0; strand < lvl + 1; strand++) {
+      ctx.strokeStyle = strand % 2 ? LV.core : "#ffffff"; ctx.globalAlpha = 0.75 * open;
       ctx.beginPath();
       for (let x = 0; x <= L; x += 6) {
-        const y = Math.sin(x * 0.07 - time * 45 + strand * Math.PI) * 7 * w * (1 - Math.exp(-x / 30));
+        const y = Math.sin(x * 0.07 - time * (45 + lvl * 10) + strand * (Math.PI * 2 / (lvl + 1))) * 7 * w * (1 - Math.exp(-x / 30));
         x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
       ctx.stroke();
+    }
+    if (lvl >= 3) {                     // nível máximo: relâmpagos a saltar à volta do feixe
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5;
+      for (let arc = 0; arc < 3; arc++) {
+        ctx.globalAlpha = 0.8 * open; ctx.beginPath();
+        let y = 0; ctx.moveTo(0, 0);
+        for (let x = 12; x <= L; x += 14) { y = clamp(y + rand(-9, 9), -26 * w, 26 * w); ctx.lineTo(x, y); }
+        ctx.stroke();
+      }
     }
     // pulsos de energia a viajar no feixe
     for (let i = 0; i < 4; i++) {
@@ -1145,16 +1546,18 @@ function drawLaser() {
     }
     ctx.restore();
     // visor: clarão de lente
-    glow(b.ox, b.oy, 30 * w * pulse, PAL.red, 1); glow(b.ox, b.oy, 11 * w, PAL.white, 1, true);
-    glowStretch(b.ox, b.oy, 150 * w, 5, PAL.pink, 0.9 * w); glowStretch(b.ox, b.oy, 5, 40 * w, PAL.pink, 0.5 * w);
+    glow(b.ox, b.oy, 30 * w * pulse, LV.outer, 1); glow(b.ox, b.oy, 11 * w, PAL.white, 1, true);
+    glowStretch(b.ox, b.oy, 150 * w, 5, LV.core, 0.9 * open); glowStretch(b.ox, b.oy, 5, 40 * w, LV.core, 0.5 * open);
     // impacto
     if (b.hit) {
       const r = 26 * pulse * w;
-      glow(b.ex, b.ey, r * 2.4, PAL.red, 0.9); glow(b.ex, b.ey, r, PAL.redHot, 1, true); glow(b.ex, b.ey, r * 0.45, PAL.white, 1, true);
+      glow(b.ex, b.ey, r * 2.4, LV.outer, 0.9); glow(b.ex, b.ey, r, LV.mid, 1, true); glow(b.ex, b.ey, r * 0.45, PAL.white, 1, true);
       ctx.save(); ctx.translate(b.ex, b.ey); ctx.rotate(time * 3);
-      glowStretch(0, 0, r * 5, 4, PAL.pink, 0.8 * w); glowStretch(0, 0, 4, r * 5, PAL.pink, 0.8 * w);
+      glowStretch(0, 0, r * 5, 4, LV.core, 0.8 * open); glowStretch(0, 0, 4, r * 5, LV.core, 0.8 * open);
       ctx.restore();
     }
+    // inimigos atravessados pelo feixe máximo brilham por dentro
+    if (b.pierce) for (const e of b.targets) glow(e.x, e.y - e.h / 2, 50, LV.mid, 0.5);
   }
   NORMAL();
 }
@@ -1172,9 +1575,18 @@ function drawHud() {
     if (glowHex) { ADD(); glow(x + 50 + 160 * v / max, yy + 6, 14, glowHex, 0.6); NORMAL(); }
   };
   bar("HP", k.hp, C.maxHp, "#3fbf5a", y);
-  bar("FURY", k.fury, C.maxFury, "#d8323c", y + 20, k.action === "laser" || k.action === "charge" ? PAL.red : null);
-  ctx.fillStyle = "#8a8f9c"; ctx.font = "10px Silkscreen, monospace";
-  ctx.fillText(k.flying ? "MODO: VOO" : "MODO: SOLO", x, y + 52);
+  const blinkLow = (k.weak || k.exhausted) && Math.floor(time * 6) % 2;
+  bar("FURY", k.fury, C.maxFury, blinkLow ? "#5a1a1e" : "#d8323c", y + 20, k.action === "laser" || k.action === "charge" ? PAL.red : null);
+  // marca da energia necessária para levantar
+  ctx.fillStyle = "#e8e3d688"; ctx.fillRect(x + 50 + 160 * C.recoverAt / C.maxFury, y + 18, 1, 16);
+  ctx.font = "10px Silkscreen, monospace";
+  if (k.action === "laser" && k.beam) {          // nível do laser com 3 pips
+    const LV = C.laserLevels[k.laserLevel - 1];
+    ctx.fillStyle = LV.core === "#ffffff" ? "#ffd27a" : LV.core; ctx.fillText("LASER NV " + k.laserLevel, x + 218, y + 31);
+    for (let i = 0; i < 3; i++) { ctx.fillStyle = i < k.laserLevel ? C.laserLevels[i].mid : "#ffffff22"; ctx.fillRect(x + 300 + i * 10, y + 22, 7, 9); }
+  }
+  ctx.fillStyle = k.exhausted ? (Math.floor(time * 4) % 2 ? "#ff6a5c" : "#8a8f9c") : k.weak ? "#ff9a5c" : "#8a8f9c";
+  ctx.fillText(k.exhausted ? "EXAUSTO — A RECUPERAR" : k.weak ? "ENERGIA BAIXA" : k.flying ? "MODO: VOO" : "MODO: SOLO", x, y + 52);
 }
 function drawScreenFx() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1236,16 +1648,18 @@ function render() {
   }
   drawLaser();
   if (ready) drawKaneFront(...fr);
+  drawBolts();
   drawRings();
   drawParticles("front");
   // números de dano
   ctx.textAlign = "center";
   for (const f of floats) {
-    const age = 0.8 - f.t, pop = age < 0.08 ? 1 + (0.08 - age) * 8 : 1;
+    const age = (f.t0 ?? 0.8) - f.t, pop = age < 0.08 ? 1 + (0.08 - age) * 8 : 1;
     ctx.globalAlpha = Math.min(f.t * 2, 1);
     ctx.font = Math.round((f.big ? 18 : 12) * pop) + "px Silkscreen, monospace";
-    ctx.fillStyle = "#000"; ctx.fillText(f.v, f.x + 1, f.y - Math.min(age, 0.25) * 120 - age * 20 + 1);
-    ctx.fillStyle = f.big ? PAL.cyanSoft : "#fff"; ctx.fillText(f.v, f.x, f.y - Math.min(age, 0.25) * 120 - age * 20);
+    const fy = typeof f.v === "string" ? f.y - age * 30 : f.y - Math.min(age, 0.25) * 120 - age * 20;
+    ctx.fillStyle = "#000"; ctx.fillText(f.v, f.x + 1, fy + 1);
+    ctx.fillStyle = f.col || (f.big ? PAL.cyanSoft : "#fff"); ctx.fillText(f.v, f.x, fy);
   }
   ctx.globalAlpha = 1; ctx.textAlign = "left";
   drawScreenFx();
@@ -1262,7 +1676,7 @@ function frame(now) {
     if (hitstop > 0) { hitstop -= STEP; updateParticles(STEP * 0.2); }      // hit-stop: o mundo quase para
     else {
       lights.length = 0;
-      updateKane(STEP); updateEnemies(STEP); Object.assign(prev, held);
+      updateKane(STEP); updateEnemies(STEP); updateBolts(STEP); Object.assign(prev, held);
       updateParticles(STEP);
       k.beamFade = Math.max(0, k.beamFade - (k.beam ? 0 : STEP));
       for (let i = ghosts.length - 1; i >= 0; i--) if ((ghosts[i].t -= STEP) <= 0) ghosts.splice(i, 1);

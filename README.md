@@ -40,3 +40,8 @@ func take_hit(damage: float, knockback: Vector2, source: Node) -> void
 ```
 O método pode estar no corpo do inimigo ou no pai de uma hurtbox `Area2D`.
 Camadas de física: 1 = mundo, 2 = inimigos, 3 = jogador.
+
+## Mecânicas (versão web)
+- **Laser por níveis:** quanto mais tempo manténs o laser, mais forte fica. Nível 1 (vermelho) → nível 2 aos 0,9 s (laranja, mais largo, destrói projéteis) → máximo aos 2 s (branco incandescente, relâmpagos, atravessa inimigos e atordoa-os, empurra o Kane para trás). Cada nível gasta mais FURY.
+- **Exaustão:** se a FURY chega a zero, o Kane perde as forças, cai se estiver a voar e ajoelha-se. Recupera mais depressa ajoelhado e só se levanta aos 40 de FURY. Abaixo de 25 fica fraco (mais lento, visor a falhar).
+- **Soldado de Choque** (`assets/trooper`, `tools/extract_trooper_sprites.py`): patrulha, persegue, ajoelha-se e dispara 3 projéteis com aviso de mira. O soco devolve os projéteis; o soco de energia e o laser máximo atordoam-no. Ao morrer, explode e deixa destroços a fumegar.
