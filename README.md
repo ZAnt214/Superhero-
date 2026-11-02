@@ -10,13 +10,17 @@ Controlador do jogador para **Godot 4.3+**.
 | `scripts/kane/kane_hud.gd` | Barras de HP/FURY (exemplo) |
 | `scripts/kane/training_dummy.gd` | Inimigo de exemplo com `take_hit()` |
 | `scenes/demo.tscn` | Cena de teste (corre com F5) |
+| `web/kane-teste.html` | Versão web com controlos de toque (para testar no telemóvel) |
+| `tools/extract_kane_sprites.py` | Recorta a sheet de referência e gera as sprite sheets |
 
-## Integrar a arte
-1. Exporta do Aseprite 3 PNG em tira horizontal, com frames de 64×128:
-   `idle_sheet.png` (6 frames), `run_flight_sheet.png` (4), `attack_sheet.png` (4).
-2. Põe os PNG em `assets/kane/` e arrasta-os para os exports **Idle/Run Flight/Attack Sheet** do `KanePlayer`.
-   Sem as sheets, o script usa retângulos de cor para poderes testar o controlo.
-3. A origem (32,120) fica nos pés. A colisão é uma cápsula de 28×108.
+## Arte
+As sheets em `assets/kane/` foram extraídas de `assets/kane/source/kane_sheet_source.jpg`
+com `python3 tools/extract_kane_sprites.py` (sem fundo, frames 192×144, pés na origem 96,140):
+- `idle_sheet.png`: 4 frames (parado / pairar)
+- `run_flight_sheet.png`: 4 frames (deslocação em voo, também usada a correr)
+- `attack_sheet.png`: 5 frames (guarda, soco, impacto, onda de choque, regresso). O laser usa a guarda e o feixe é desenhado em código.
+
+O `KanePlayer` já carrega estas sheets por defeito. A colisão é uma cápsula de 28×108.
 
 ## Controlos (criados automaticamente se não existirem no Input Map)
 | Ação | Teclado | Comando |

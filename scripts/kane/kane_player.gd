@@ -22,9 +22,9 @@ enum Action { NONE, PUNCH_CHARGE, PUNCH, LASER }
 # ---------------------------------------------------------------- exports
 @export_group("Assets")
 @export_file("*.json") var pack_json := "res://assets/kane/kanepack001.json"
-@export var idle_sheet: Texture2D
-@export var run_flight_sheet: Texture2D
-@export var attack_sheet: Texture2D
+@export var idle_sheet: Texture2D = preload("res://assets/kane/idle_sheet.png")
+@export var run_flight_sheet: Texture2D = preload("res://assets/kane/run_flight_sheet.png")
+@export var attack_sheet: Texture2D = preload("res://assets/kane/attack_sheet.png")
 
 @export_group("Stats")
 @export var max_hp := 100.0
@@ -51,7 +51,7 @@ enum Action { NONE, PUNCH_CHARGE, PUNCH, LASER }
 @export var flight_fury_cost := 0.0     ## por segundo (0 = voo grátis)
 
 @export_group("Laser Eyes")
-@export var eye_offset := Vector2(6, -104)   ## relativo aos pés, a olhar para a direita
+@export var eye_offset := Vector2(15, -97)   ## relativo aos pés, a olhar para a direita
 @export var laser_range := 640.0
 @export var laser_windup := 0.12
 @export var laser_dps := 45.0
@@ -446,13 +446,20 @@ func _set_fury(v: float) -> void:
 func _update_animation() -> void:
 	match action:
 		Action.LASER:
-			_show_frame(A_LASER, 0 if _action_t < laser_windup else 1)
+			_show_frame(A_LASER, 0)
 		Action.PUNCH_CHARGE:
 			_show_frame(A_PUNCH, 0)
 		Action.PUNCH:
-			_show_frame(A_PUNCH, 0 if _action_t < punch_windup else 1)
+			var f := 4
+			if _action_t < punch_windup:
+				f = 1
+			elif _action_t < punch_windup + punch_active:
+				f = 2
+			elif _action_t < punch_windup + punch_active + punch_recovery * 0.5:
+				f = 3
+			_show_frame(A_PUNCH, f)
 		_:
-			if is_flying or not is_on_floor() or absf(velocity.x) > 20.0:
+			if absf(velocity.x) > 25.0 or (not is_on_floor() and not is_flying):
 				_play(A_RUN)
 				_sprite.speed_scale = clampf(absf(velocity.x) / run_speed, 0.6, 1.4) \
 					if is_on_floor() and not is_flying else 1.0
