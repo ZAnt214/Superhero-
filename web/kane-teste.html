@@ -1,0 +1,480 @@
+<title>Kane Playtest</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen&display=swap">
+<style>
+/* Ecrã de arcada único (tema escuro fixo): canvas a todo o ecrã, controlos de toque nos cantos */
+:root {
+  --bg: #0d1016;
+  --panel: #161b24;
+  --gold: #c8973f;
+  --visor: #e2333f;
+  --energy: #5fb8ff;
+  --ink: #e8e3d6;
+  --muted: #8a8f9c;
+  --pixel: "Silkscreen", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--ink); overflow: hidden;
+  font-family: var(--pixel);
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+#stage { position: fixed; inset: 0; }
+canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+
+.pad { position: fixed; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 8px; }
+.pad.left {
+  left: max(16px, env(safe-area-inset-left, 0px));
+  grid-template-columns: repeat(3, 58px); grid-template-rows: repeat(2, 58px);
+}
+.pad.right {
+  right: max(16px, env(safe-area-inset-right, 0px));
+  grid-template-columns: repeat(2, 70px); grid-template-rows: repeat(2, 62px);
+}
+.btn {
+  border: 2px solid color-mix(in srgb, var(--ink) 25%, transparent);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  color: var(--ink); font: 11px/1 var(--pixel); border-radius: 12px;
+  display: grid; place-items: center; text-align: center; padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn.on { background: color-mix(in srgb, var(--ink) 30%, transparent); transform: scale(.95); }
+.btn[data-k="up"] { grid-column: 2; grid-row: 1; }
+.btn[data-k="left"] { grid-column: 1; grid-row: 2; }
+.btn[data-k="down"] { grid-column: 2; grid-row: 2; }
+.btn[data-k="right"] { grid-column: 3; grid-row: 2; }
+.btn.laser { border-color: var(--visor); color: var(--visor); }
+.btn.punch { border-color: var(--energy); color: var(--energy); }
+.btn.fly, .btn.jump { border-color: var(--gold); color: var(--gold); }
+.btn small { display: block; font-size: 8px; color: var(--muted); margin-top: 3px; }
+
+#help {
+  position: fixed; top: calc(10px + env(safe-area-inset-top, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
+  font-size: 10px; color: var(--muted); text-align: right; line-height: 1.6; max-width: 46ch;
+}
+#rotate {
+  position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%);
+  background: var(--panel); border: 2px solid var(--gold); padding: 12px 16px;
+  font-size: 12px; text-align: center; display: none; max-width: 80vw;
+}
+@media (orientation: portrait) and (max-width: 700px) { #rotate { display: block; } #help { display: none; } }
+@media (hover: hover) and (pointer: fine) { .pad { opacity: .55; } }
+</style>
+
+<div id="stage"><canvas id="c"></canvas></div>
+<div id="help">Teclado: WASD/setas · Espaço salto · Shift voo · J laser · K soco<br>Toque: manter SOCO e soltar = soco de energia</div>
+<div id="rotate">Roda o iPhone para a horizontal</div>
+
+<div class="pad left">
+  <button class="btn" data-k="up" aria-label="Cima">▲</button>
+  <button class="btn" data-k="left" aria-label="Esquerda">◀</button>
+  <button class="btn" data-k="down" aria-label="Baixo">▼</button>
+  <button class="btn" data-k="right" aria-label="Direita">▶</button>
+</div>
+<div class="pad right">
+  <button class="btn fly" data-k="fly">VOO</button>
+  <button class="btn laser" data-k="laser">LASER<small>manter</small></button>
+  <button class="btn jump" data-k="jump">SALTO</button>
+  <button class="btn punch" data-k="punch">SOCO<small>manter = energia</small></button>
+</div>
+
+<script>
+// Porta em JavaScript de scripts/kane/kane_player.gd — mesmos valores e regras.
+const C = {
+  maxHp: 100, maxFury: 100, furyRegen: 8, invuln: 0.6,
+  runSpeed: 220, groundAccel: 1800, groundFriction: 2400, airAccel: 1100,
+  gravity: 1400, fallMult: 1.5, maxFall: 900, jumpVel: -480, jumpCut: 0.45,
+  coyote: 0.1, jumpBuffer: 0.12,
+  flightSpeed: 320, flightAccel: 1600,
+  eye: { x: 6, y: -104 }, laserRange: 640, laserWindup: 0.12, laserDps: 45, laserTick: 0.1,
+  laserFuryPerSec: 30, laserMinFury: 10, laserMoveMult: 0.35, laserKnock: 60,
+  punchDmg: 18, punchKnock: 320, punchWindup: 0.07, punchActive: 0.1, punchRecovery: 0.16,
+  punchLunge: 180, punchSize: { w: 44, h: 52 }, punchOff: { x: 28, y: -72 }, furyOnHit: 6,
+  chargeTime: 0.4, energyCost: 25, energyDmgMult: 2.5, energyKnockMult: 2.2, energySizeMult: 1.6,
+  bodyW: 28, bodyH: 108,
+};
+const COL = { gold: "#c8973f", goldDark: "#8a6424", visor: "#e2333f", blue: "#2f4f9a", blueLight: "#4a74c9",
+  suit: "#1a1d26", suitLight: "#2a2f3c", cape: "#1f2a33", capeEdge: "#30404c", energy: "#5fb8ff" };
+
+// ---------------------------------------------------------------- mundo
+const WORLD_W = 2200;
+const solids = [
+  { x: -100, y: 500, w: WORLD_W + 200, h: 200 },          // chão
+  { x: -100, y: -400, w: 100, h: 1100 },                   // parede esq.
+  { x: WORLD_W, y: -400, w: 100, h: 1100 },                // parede dir.
+  { x: 760, y: 360, w: 200, h: 20 },
+  { x: 1100, y: 270, w: 160, h: 20 },
+  { x: 1300, y: 360, w: 240, h: 20 },
+];
+const enemies = [];
+function spawnEnemy(x) { enemies.push({ x, y: 500, vx: 0, vy: 0, w: 34, h: 124, hp: 120, maxHp: 120, flash: 0, dead: 0, home: x }); }
+[620, 1000, 1500, 1900].forEach(spawnEnemy);
+
+const k = {
+  x: 320, y: 500, vx: 0, vy: 0, facing: 1, hp: C.maxHp, fury: C.maxFury,
+  flying: false, onFloor: false, action: "none", t: 0, coyote: 0, jumpBuf: 0, invuln: 0,
+  laserTick: 0, energy: false, hitIds: new Set(), beam: null, anim: 0, dead: false,
+};
+let shake = 0, floats = [];
+
+// ---------------------------------------------------------------- input
+const held = {}, prev = {};
+const pressed = n => held[n] && !prev[n];
+const released = n => !held[n] && prev[n];
+const KEYMAP = { KeyA: "left", ArrowLeft: "left", KeyD: "right", ArrowRight: "right", KeyW: "up", ArrowUp: "up",
+  KeyS: "down", ArrowDown: "down", Space: "jump", ShiftLeft: "fly", ShiftRight: "fly", KeyF: "fly", KeyJ: "laser", KeyK: "punch" };
+addEventListener("keydown", e => { if (KEYMAP[e.code]) { held[KEYMAP[e.code]] = true; e.preventDefault(); } });
+addEventListener("keyup", e => { if (KEYMAP[e.code]) held[KEYMAP[e.code]] = false; });
+document.querySelectorAll(".btn").forEach(b => {
+  const n = b.dataset.k;
+  const on = e => { e.preventDefault(); held[n] = true; b.classList.add("on"); try { b.setPointerCapture(e.pointerId); } catch {} };
+  const off = () => { held[n] = false; b.classList.remove("on"); };
+  b.addEventListener("pointerdown", on);
+  b.addEventListener("pointerup", off);
+  b.addEventListener("pointercancel", off);
+  b.addEventListener("lostpointercapture", off);
+  b.addEventListener("contextmenu", e => e.preventDefault());
+});
+document.addEventListener("gesturestart", e => e.preventDefault());
+
+// ---------------------------------------------------------------- física
+const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+const bodyRect = (o, w, h) => ({ x: o.x - w / 2, y: o.y - h, w, h });
+const approach = (v, t, d) => v < t ? Math.min(v + d, t) : Math.max(v - d, t);
+
+function moveAndSlide(o, w, h, dt) {
+  o.onFloor = false;
+  o.x += o.vx * dt;
+  for (const s of solids) {
+    const r = bodyRect(o, w, h);
+    if (overlap(r, s)) { o.x = o.vx > 0 ? s.x - w / 2 : s.x + s.w + w / 2; o.vx = 0; }
+  }
+  o.y += o.vy * dt;
+  for (const s of solids) {
+    const r = bodyRect(o, w, h);
+    if (overlap(r, s)) {
+      if (o.vy > 0) { o.y = s.y; o.onFloor = true; } else { o.y = s.y + s.h + h; }
+      o.vy = 0;
+    }
+  }
+  if (!o.onFloor) { // contacto exato com o chão
+    const probe = bodyRect(o, w, h); probe.y += 1;
+    o.onFloor = o.vy >= 0 && solids.some(s => overlap(probe, s));
+  }
+}
+
+function rayAABB(ox, oy, dx, dy, r) {
+  let tmin = 0, tmax = Infinity;
+  for (const [o, d, lo, hi] of [[ox, dx, r.x, r.x + r.w], [oy, dy, r.y, r.y + r.h]]) {
+    if (Math.abs(d) < 1e-9) { if (o < lo || o > hi) return Infinity; continue; }
+    let t1 = (lo - o) / d, t2 = (hi - o) / d;
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+    if (tmin > tmax) return Infinity;
+  }
+  return tmin;
+}
+
+function hitEnemy(e, dmg, kx, ky) {
+  e.hp -= dmg; e.vx += kx; e.vy += ky; e.flash = 0.1;
+  floats.push({ x: e.x + (Math.random() * 20 - 10), y: e.y - e.h - 10, v: Math.round(dmg), t: 0.7, big: dmg > 30 });
+  if (e.hp <= 0) { e.dead = 2.5; }
+}
+
+// ---------------------------------------------------------------- Kane
+function setFlying(on) { if (on === k.flying) return; k.flying = on; if (on) k.vy = Math.min(k.vy, 0); }
+function start(a) { k.action = a; k.t = 0; }
+function setFury(v) { k.fury = Math.max(0, Math.min(C.maxFury, v)); }
+
+function inputVec() {
+  let x = (held.right ? 1 : 0) - (held.left ? 1 : 0), y = (held.down ? 1 : 0) - (held.up ? 1 : 0);
+  const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; }
+  return { x, y };
+}
+
+function updateKane(dt) {
+  if (k.dead) { k.vy = Math.min(k.vy + C.gravity * dt, C.maxFall); k.vx = approach(k.vx, 0, C.groundFriction * dt); moveAndSlide(k, C.bodyW, C.bodyH, dt); return; }
+  const inp = inputVec();
+  if (pressed("jump")) k.jumpBuf = C.jumpBuffer;
+  if (pressed("fly")) setFlying(!k.flying);
+  if (k.action === "none" || k.action === "charge") { if (inp.x > 0.1) k.facing = 1; else if (inp.x < -0.1) k.facing = -1; }
+
+  k.jumpBuf = Math.max(k.jumpBuf - dt, 0);
+  k.invuln = Math.max(k.invuln - dt, 0);
+  k.coyote = k.onFloor ? C.coyote : Math.max(k.coyote - dt, 0);
+
+  // ações
+  k.t += dt; k.beam = null;
+  if (k.action === "none") {
+    if (pressed("laser") && k.fury >= C.laserMinFury) { start("laser"); k.laserTick = 0; }
+    else if (pressed("punch")) start("charge");
+  } else if (k.action === "charge") {
+    if (!held.punch) {
+      k.energy = k.t >= C.chargeTime && k.fury >= C.energyCost;
+      if (k.energy) setFury(k.fury - C.energyCost);
+      k.hitIds.clear(); start("punch");
+      k.vx += k.facing * C.punchLunge * (k.energy ? 1.5 : 1);
+    }
+  } else if (k.action === "punch") {
+    if (k.t >= C.punchWindup && k.t < C.punchWindup + C.punchActive) punchQuery();
+    else if (k.t >= C.punchWindup + C.punchActive + C.punchRecovery) start("none");
+  } else if (k.action === "laser") {
+    if (!held.laser || k.fury <= 0) start("none");
+    else if (k.t >= C.laserWindup) fireLaser(dt, inp);
+  }
+
+  // locomoção
+  const mult = { laser: C.laserMoveMult, punch: 0, charge: 0.5 }[k.action] ?? 1;
+  if (k.flying) {
+    const tx = inp.x * C.flightSpeed * mult, ty = inp.y * C.flightSpeed * mult;
+    const dx = tx - k.vx, dy = ty - k.vy, d = Math.hypot(dx, dy), step = C.flightAccel * dt;
+    if (d <= step) { k.vx = tx; k.vy = ty; } else { k.vx += dx / d * step; k.vy += dy / d * step; }
+    if (k.onFloor && inp.y > 0.5) setFlying(false);
+  } else {
+    const tx = inp.x * C.runSpeed * mult;
+    const acc = k.onFloor ? (tx === 0 ? C.groundFriction : C.groundAccel) : C.airAccel;
+    k.vx = approach(k.vx, tx, acc * dt);
+    k.vy = Math.min(k.vy + C.gravity * (k.vy > 0 ? C.fallMult : 1) * dt, C.maxFall);
+    const canJump = k.action !== "punch" && k.action !== "laser";
+    if (k.jumpBuf > 0 && canJump) {
+      if (k.coyote > 0) { k.vy = C.jumpVel; k.jumpBuf = 0; k.coyote = 0; }
+      else if (pressed("jump")) { setFlying(true); k.jumpBuf = 0; }
+    }
+    if (released("jump") && k.vy < 0) k.vy *= C.jumpCut;
+  }
+  moveAndSlide(k, C.bodyW, C.bodyH, dt);
+  if (k.y < 70) { k.y = 70; k.vy = Math.max(k.vy, 0); }   // teto do nível
+
+  if (k.action !== "laser") setFury(k.fury + C.furyRegen * dt);
+  k.anim += dt;
+
+  // contacto com inimigos = dano
+  const kr = bodyRect(k, C.bodyW, C.bodyH);
+  for (const e of enemies) if (!e.dead && k.invuln <= 0 && overlap(kr, bodyRect(e, e.w, e.h))) {
+    k.hp = Math.max(0, k.hp - 10); k.invuln = C.invuln; k.vx = Math.sign(k.x - e.x || 1) * 260; k.vy = -220;
+    start("none"); shake = 6; if (k.hp <= 0) { k.dead = true; k.flying = false; setTimeout(respawn, 1500); }
+  }
+}
+
+function respawn() { Object.assign(k, { x: 320, y: 500, vx: 0, vy: 0, hp: C.maxHp, fury: C.maxFury, dead: false, invuln: 1, action: "none" }); }
+
+function fireLaser(dt, inp) {
+  let dx = k.facing, dy = 0;
+  if (inp.y < -0.5) { dx = k.facing * Math.SQRT1_2; dy = -Math.SQRT1_2; }
+  else if (inp.y > 0.5 && !k.onFloor) { dx = k.facing * Math.SQRT1_2; dy = Math.SQRT1_2; }
+  const ox = k.x + C.eye.x * k.facing, oy = k.y + C.eye.y;
+  let best = C.laserRange, target = null;
+  for (const s of solids) { const t = rayAABB(ox, oy, dx, dy, s); if (t < best) { best = t; target = null; } }
+  for (const e of enemies) if (!e.dead) { const t = rayAABB(ox, oy, dx, dy, bodyRect(e, e.w, e.h)); if (t < best) { best = t; target = e; } }
+  k.beam = { ox, oy, ex: ox + dx * best, ey: oy + dy * best, hit: best < C.laserRange };
+  if (target) {
+    k.laserTick += dt;
+    if (k.laserTick >= C.laserTick) { k.laserTick -= C.laserTick; hitEnemy(target, C.laserDps * C.laserTick, dx * C.laserKnock, dy * C.laserKnock); }
+  }
+  setFury(k.fury - C.laserFuryPerSec * dt);
+}
+
+function punchQuery() {
+  const s = k.energy ? C.energySizeMult : 1;
+  const w = C.punchSize.w * s, h = C.punchSize.h * s;
+  const cx = k.x + C.punchOff.x * s * k.facing, cy = k.y + C.punchOff.y;
+  const box = { x: cx - w / 2, y: cy - h / 2, w, h };
+  const dmg = C.punchDmg * (k.energy ? C.energyDmgMult : 1), kb = C.punchKnock * (k.energy ? C.energyKnockMult : 1);
+  enemies.forEach((e, i) => {
+    if (e.dead || k.hitIds.has(i) || !overlap(box, bodyRect(e, e.w, e.h))) return;
+    k.hitIds.add(i);
+    const n = Math.hypot(1, 0.35);
+    hitEnemy(e, dmg, k.facing / n * kb, -0.35 / n * kb);
+    setFury(k.fury + C.furyOnHit);
+    shake = k.energy ? 10 : 4;
+  });
+}
+
+function updateEnemies(dt) {
+  for (const e of enemies) {
+    if (e.dead) { e.dead -= dt; if (e.dead <= 0) Object.assign(e, { dead: 0, hp: e.maxHp, x: e.home, y: 500, vx: 0, vy: 0 }); continue; }
+    e.vy = Math.min(e.vy + 1400 * dt, 900);
+    e.vx = approach(e.vx, 0, 1200 * dt);
+    moveAndSlide(e, e.w, e.h, dt);
+    e.flash = Math.max(e.flash - dt, 0);
+  }
+  floats = floats.filter(f => (f.t -= dt) > 0);
+}
+
+// ---------------------------------------------------------------- render
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+let viewW = 960, viewH = 540, scale = 1, camX = 0, safeTop = 0, safeLeft = 0;
+function resize() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+  scale = Math.min(innerWidth / 640, innerHeight / 540) * dpr;
+  viewW = cv.width / scale; viewH = cv.height / scale;
+  ctx.imageSmoothingEnabled = false;
+  const probe = document.getElementById("rotate"), cs = getComputedStyle(document.documentElement);
+  safeTop = (parseFloat(cs.paddingTop) || 0) * dpr / scale;
+  safeLeft = (parseFloat(getComputedStyle(document.querySelector(".pad.left")).left) - 16 || 0) * dpr / scale;
+}
+addEventListener("resize", resize); resize();
+
+const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x * 4, y * 4, w * 4, h * 4); };
+
+function drawKane() {
+  if (k.invuln > 0 && Math.floor(k.invuln * 20) % 2) return;
+  const moving = Math.abs(k.vx) > 20;
+  const air = k.flying || !k.onFloor;
+  const run = !air && moving && k.action === "none";
+  const f = Math.floor(k.anim * (run ? 12 : 8));
+  const bob = !air && !moving ? (f % 6 < 3 ? 0 : 1) : 0;
+  ctx.save();
+  ctx.translate(k.x, k.y);
+  ctx.scale(k.facing, 1);
+  if (k.flying && moving) { ctx.translate(0, -60); ctx.rotate(0.35 * Math.min(Math.abs(k.vx) / C.flightSpeed, 1)); ctx.translate(0, 60); }
+  if (k.dead) { ctx.translate(0, 0); ctx.rotate(-1.4); }
+
+  // capa (atrás)
+  const flow = air || moving ? 3 + (f % 2) : 0;
+  px(-6 - flow, -25 + bob, 4 + flow, 18 - (air ? 4 : 0), COL.cape);
+  px(-7 - flow, -10 + bob - (air ? 4 : 0), 3 + flow, 4, COL.capeEdge);
+
+  // pernas
+  const step = run ? [0, 2, 0, -2][f % 4] : 0;
+  const legY = air && !k.onFloor ? -1 : 0;
+  px(-4 + step / 2, -12 + legY, 3, 12 - (step > 0 ? 1 : 0), COL.suit);
+  px(1 - step / 2, -12 + legY, 3, 12 - (step < 0 ? 1 : 0), COL.suitLight);
+  px(-4 + step / 2, -7 + legY, 3, 2, COL.blue);
+  px(1 - step / 2, -7 + legY, 3, 2, COL.blueLight);
+  px(-4 + step / 2, -2 + legY, 3, 2, COL.goldDark);
+  px(1 - step / 2, -2 + legY, 3, 2, COL.gold);
+
+  // tronco
+  px(-5, -24 + bob, 10, 12, COL.suit);
+  px(-3, -23 + bob, 6, 6, COL.blue);
+  px(-2, -22 + bob, 4, 2, COL.blueLight);
+  px(-1, -19 + bob, 2, 3, COL.blueLight);
+  px(-5, -13 + bob, 10, 1, COL.gold);
+  px(-6, -25 + bob, 3, 3, COL.goldDark);
+  px(3, -25 + bob, 3, 3, COL.gold);
+
+  // braços
+  px(-7, -22 + bob, 2, 8, COL.suitLight);
+  px(-7, -15 + bob, 2, 2, COL.goldDark);
+  if (k.action === "punch" && k.t >= C.punchWindup) {
+    px(4, -20 + bob, 8, 2, COL.suitLight);
+    px(12, -21 + bob, 3, 4, COL.gold);
+    if (k.energy) {
+      ctx.fillStyle = COL.energy; ctx.globalAlpha = 0.5 + 0.5 * Math.sin(k.t * 60);
+      ctx.beginPath(); ctx.arc(64, (-19 + bob) * 4, 22, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+    }
+  } else if (k.action === "charge") {
+    px(3, -18 + bob, 2, 5, COL.suitLight); px(1, -14 + bob, 3, 3, COL.gold);
+    const charged = k.t >= C.chargeTime && k.fury >= C.energyCost;
+    ctx.fillStyle = charged ? COL.energy : "rgba(95,184,255,.35)";
+    ctx.globalAlpha = 0.4 + 0.3 * Math.sin(k.t * 30);
+    ctx.beginPath(); ctx.arc(10, (-12.5 + bob) * 4, 8 + Math.min(k.t / C.chargeTime, 1) * 10, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+  } else {
+    px(4, -22 + bob, 2, 8, COL.suitLight);
+    px(4, -15 + bob, 2, 2, COL.gold);
+  }
+
+  // cabeça
+  px(-3, -31 + bob, 6, 7, COL.gold);
+  px(-3, -31 + bob, 6, 1, COL.goldDark);
+  px(-1, -28 + bob, 4, 2, k.action === "laser" ? "#ffd0d4" : COL.visor);
+  ctx.restore();
+}
+
+function drawBeam() {
+  if (!k.beam) return;
+  const b = k.beam, pulse = 1 + 0.25 * Math.sin(k.t * 60);
+  ctx.lineCap = "round";
+  ctx.strokeStyle = COL.visor; ctx.lineWidth = 10 * pulse;
+  ctx.beginPath(); ctx.moveTo(b.ox, b.oy); ctx.lineTo(b.ex, b.ey); ctx.stroke();
+  ctx.strokeStyle = "#ffe6e8"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(b.ox, b.oy); ctx.lineTo(b.ex, b.ey); ctx.stroke();
+  if (b.hit) { ctx.fillStyle = "#ffb3ba"; ctx.beginPath(); ctx.arc(b.ex, b.ey, 8 * pulse, 0, 7); ctx.fill(); }
+}
+
+function drawEnemy(e) {
+  if (e.dead) return;
+  ctx.save(); ctx.translate(e.x, e.y);
+  const h = e.h, w = e.w;
+  ctx.fillStyle = e.flash > 0 ? "#fff" : "#5a3b2a"; ctx.fillRect(-w / 2, -h, w, h);
+  ctx.fillStyle = e.flash > 0 ? "#fff" : "#a8682f"; ctx.fillRect(-w / 2 + 4, -h + 4, w - 8, 22);
+  ctx.fillStyle = "#1a1d26"; ctx.fillRect(-8, -h + 12, 16, 4);
+  ctx.fillStyle = "#2a1c14"; ctx.fillRect(-w / 2, -h / 2, w, 4);
+  ctx.fillStyle = "#000a"; ctx.fillRect(-20, -h - 12, 40, 5);
+  ctx.fillStyle = "#e2333f"; ctx.fillRect(-20, -h - 12, 40 * Math.max(e.hp, 0) / e.maxHp, 5);
+  ctx.restore();
+}
+
+function drawBackground() {
+  ctx.fillStyle = "#0d1016"; ctx.fillRect(camX - 50, -500, viewW + 100, 1500);
+  // skyline em parallax
+  ctx.fillStyle = "#141a26";
+  for (let i = -2; i < 30; i++) {
+    const bx = i * 140 + camX * 0.5, h = 120 + ((i * 73) % 5) * 40;
+    ctx.fillRect(bx, 500 - h, 110, h);
+  }
+  ctx.fillStyle = "#1b2231";
+  for (let i = -2; i < 30; i++) {
+    const bx = i * 210 + 60 + camX * 0.25, h = 200 + ((i * 37) % 4) * 50;
+    ctx.fillRect(bx, 500 - h - 40, 70, 40);
+  }
+}
+
+function drawHud() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  const x = 16 + safeLeft, y = 16 + safeTop;
+  const bar = (label, v, max, col, yy) => {
+    ctx.fillStyle = "#e8e3d6"; ctx.font = "12px Silkscreen, monospace"; ctx.fillText(label, x, yy + 11);
+    ctx.fillStyle = "#000a"; ctx.fillRect(x + 50, yy, 160, 12);
+    ctx.fillStyle = col; ctx.fillRect(x + 50, yy, 160 * v / max, 12);
+    ctx.strokeStyle = "#e8e3d655"; ctx.strokeRect(x + 50.5, yy + .5, 159, 11);
+  };
+  bar("HP", k.hp, C.maxHp, "#3fbf5a", y);
+  bar("FURY", k.fury, C.maxFury, "#d8323c", y + 20);
+  ctx.fillStyle = "#8a8f9c"; ctx.font = "10px Silkscreen, monospace";
+  ctx.fillText(k.flying ? "MODO: VOO" : "MODO: SOLO", x, y + 52);
+}
+
+function render() {
+  const sx = (Math.random() - 0.5) * shake, sy = (Math.random() - 0.5) * shake;
+  shake = Math.max(0, shake - 0.6);
+  camX += (Math.max(0, Math.min(WORLD_W - viewW, k.x - viewW / 2)) - camX) * 0.15;
+  const camY = 540 - viewH;
+  ctx.setTransform(scale, 0, 0, scale, (-camX + sx) * scale, (-camY + sy) * scale);
+  drawBackground();
+  ctx.fillStyle = "#232a38";
+  for (const s of solids) ctx.fillRect(s.x, s.y, s.w, s.h);
+  ctx.fillStyle = "#c8973f33";
+  for (const s of solids) ctx.fillRect(s.x, s.y, s.w, 3);
+  enemies.forEach(drawEnemy);
+  drawBeam();
+  drawKane();
+  ctx.textAlign = "center";
+  for (const f of floats) {
+    ctx.globalAlpha = Math.min(f.t * 2, 1);
+    ctx.fillStyle = f.big ? COL.energy : "#fff"; ctx.font = (f.big ? 18 : 12) + "px Silkscreen, monospace";
+    ctx.fillText(f.v, f.x, f.y - (0.7 - f.t) * 60);
+  }
+  ctx.globalAlpha = 1; ctx.textAlign = "left";
+  drawHud();
+}
+
+// ---------------------------------------------------------------- loop (passo fixo 60 Hz)
+let last = performance.now(), acc = 0;
+const STEP = 1 / 60;
+function frame(now) {
+  acc += Math.min((now - last) / 1000, 0.1); last = now;
+  while (acc >= STEP) {
+    updateKane(STEP); updateEnemies(STEP);
+    Object.assign(prev, held);
+    acc -= STEP;
+  }
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
