@@ -1,0 +1,415 @@
+<title>Kane: Escolha da Visão</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen&family=Chakra+Petch:wght@400;500;600&display=swap">
+<style>
+/* Layout: cabeçalho curto + grelha de 4 "ecrãs de jogo" vivos, cada um com a ficha da visão por baixo. Tema único escuro (mundo do jogo). */
+:root {
+  --bg: #0b0a10;
+  --panel: #14121b;
+  --line: #2a2533;
+  --ink: #ece6dc;
+  --muted: #9a93a3;
+  --visor: #ff3344;
+  --gold: #d9a54a;
+  --cyan: #5fd8ff;
+  --display: "Silkscreen", ui-monospace, "SF Mono", Menlo, monospace;
+  --body: "Chakra Petch", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 48px; }
+header { display: grid; gap: 10px; margin-bottom: 26px; max-width: 70ch; }
+.eyebrow { font-family: var(--display); font-size: 11px; letter-spacing: .14em; color: var(--visor); text-transform: uppercase; }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(26px, 4.4vw, 40px); line-height: 1.05; margin: 0; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 500px), 1fr)); gap: 22px; }
+.view { display: grid; grid-template-rows: auto 1fr; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; min-width: 0; }
+.view.pick { border-color: color-mix(in srgb, var(--visor) 70%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--visor) 40%, transparent), 0 10px 40px -12px color-mix(in srgb, var(--visor) 45%, transparent); }
+.screen { position: relative; aspect-ratio: 16 / 10; max-width: 100%; background: #07060b; }
+.screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.tag { position: absolute; left: 10px; top: 10px; font-family: var(--display); font-size: 11px; letter-spacing: .08em; padding: 5px 8px; background: rgba(8, 7, 12, .72); border: 1px solid var(--line); color: var(--ink); }
+.rec { position: absolute; right: 10px; top: 10px; font-family: var(--display); font-size: 10px; letter-spacing: .1em; padding: 5px 8px; background: var(--visor); color: #12060a; }
+.body { padding: 16px 18px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+h2 { font-family: var(--display); font-weight: 400; font-size: 17px; letter-spacing: .02em; margin: 0; }
+.body > p { margin: 0; color: var(--muted); }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 4px 0 0; font-size: 14px; }
+dt { font-family: var(--display); font-size: 10px; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; padding-top: 3px; }
+dd { margin: 0; min-width: 0; }
+.ok { color: #7fd99a; } .mid { color: var(--gold); } .no { color: #ff7a6a; }
+footer { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); max-width: 70ch; }
+footer strong { color: var(--ink); font-weight: 600; }
+.err { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 16px; color: var(--muted); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .view { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">Kane // Colecionador de Cinzas</span>
+    <h1>Que visão queres para o jogo?</h1>
+    <p>As quatro cenas abaixo correm ao vivo com os sprites reais do Kane e do Soldado de Choque, no mesmo bairro em ruínas. Em cada uma, o Kane anda, dispara o laser, voa e volta a aterrar. Escolhe a que mais gostas.</p>
+  </header>
+
+  <section class="grid">
+    <article class="view pick" id="v-hd2d">
+      <div class="screen"><canvas aria-label="Demonstração da visão 3D com sprites"></canvas><span class="tag">A · 3D COM SPRITES</span><span class="rec">RECOMENDADO</span></div>
+      <div class="body">
+        <h2>3D com sprites (HD-2D)</h2>
+        <p>Mundo 3D com perspetiva, luz e profundidade; o Kane e os inimigos continuam em pixel art, em pé dentro do cenário. Câmara atrás e acima, a seguir o Kane.</p>
+        <dl>
+          <dt>Movimento</dt><dd>Todas as direções no chão, mais voo em altura</dd>
+          <dt>Arte atual</dt><dd class="ok">Aproveita os sprites que já tens</dd>
+          <dt>Trabalho</dt><dd class="mid">Novo motor 3D; poderes e inimigos adaptados</dd>
+        </dl>
+      </div>
+    </article>
+
+    <article class="view" id="v-iso">
+      <div class="screen"><canvas aria-label="Demonstração da visão isométrica"></canvas><span class="tag">B · ISOMÉTRICA</span></div>
+      <div class="body">
+        <h2>Isométrica (vista de cima)</h2>
+        <p>Câmara fixa na diagonal, de cima, sem perspetiva. Lê-se muito bem o combate e a posição dos inimigos à volta.</p>
+        <dl>
+          <dt>Movimento</dt><dd>Todas as direções; o voo vê-se pela sombra no chão</dd>
+          <dt>Arte atual</dt><dd class="mid">Funciona, mas só com esquerda/direita; o ideal são sprites em 4 ou 8 direções</dd>
+          <dt>Trabalho</dt><dd class="mid">Novo motor; arte nova para ficar perfeito</dd>
+        </dl>
+      </div>
+    </article>
+
+    <article class="view" id="v-side">
+      <div class="screen"><canvas aria-label="Demonstração da visão 2.5D lateral"></canvas><span class="tag">C · 2.5D LATERAL</span></div>
+      <div class="body">
+        <h2>2.5D lateral</h2>
+        <p>Joga-se de lado como agora, mas o cenário é 3D a sério: os prédios têm volume, a perspetiva muda quando a câmara anda e há profundidade real.</p>
+        <dl>
+          <dt>Movimento</dt><dd>Esquerda/direita e voo, como hoje</dd>
+          <dt>Arte atual</dt><dd class="ok">Aproveita tudo</dd>
+          <dt>Trabalho</dt><dd class="ok">O menor: a jogabilidade fica igual</dd>
+        </dl>
+      </div>
+    </article>
+
+    <article class="view" id="v-tps">
+      <div class="screen"><canvas aria-label="Demonstração da visão 3D em terceira pessoa"></canvas><span class="tag">D · 3.ª PESSOA</span></div>
+      <div class="body">
+        <h2>3D completo, 3.ª pessoa</h2>
+        <p>Câmara atrás das costas do Kane, como nos jogos de super-heróis em mundo aberto. A figura nesta demo é provisória, feita de blocos com as cores do Kane.</p>
+        <dl>
+          <dt>Movimento</dt><dd>Livre em 3D, voo total</dd>
+          <dt>Arte atual</dt><dd class="no">Não serve: precisa de um modelo 3D do Kane e dos inimigos</dd>
+          <dt>Trabalho</dt><dd class="no">O maior: modelos, animações 3D e câmara</dd>
+        </dl>
+      </div>
+    </article>
+  </section>
+
+  <footer>Responde no chat com a letra da visão (<strong>A</strong>, <strong>B</strong>, <strong>C</strong> ou <strong>D</strong>). A minha sugestão é a <strong>A</strong>: dá o salto para 3D sem perder a pixel art que já tens.</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+"use strict";
+const KANE_SRC = "__KANE__", TROOPER_SRC = "__TROOPER__";
+const PPU = 72;                       // píxeis do sprite por unidade 3D (Kane ≈ 1,8 de altura)
+const FW = 224, FH = 144, OX = 112, OY = 140;
+
+// ---------------------------------------------------------------- texturas geradas
+function cv(w, h, draw) { const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d"), w, h); return c; }
+function rnd(seed) { return () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }; }
+const glowCanvas = cv(64, 64, (g) => { const r = g.createRadialGradient(32, 32, 0, 32, 32, 32); r.addColorStop(0, "rgba(255,255,255,1)"); r.addColorStop(.25, "rgba(255,255,255,.55)"); r.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = r; g.fillRect(0, 0, 64, 64); });
+const asphaltCanvas = cv(128, 128, (g, w, h) => {
+  g.fillStyle = "#1c1d24"; g.fillRect(0, 0, w, h); const R = rnd(3);
+  for (let i = 0; i < 900; i++) { g.fillStyle = R() < .5 ? "#24262e" : "#15161b"; g.fillRect(R() * w, R() * h, 1, 1); }
+  g.strokeStyle = "#0e0f13"; for (let i = 0; i < 6; i++) { g.beginPath(); let x = R() * w, y = R() * h; g.moveTo(x, y); for (let j = 0; j < 5; j++) { x += (R() - .5) * 18; y += (R() - .5) * 18; g.lineTo(x, y); } g.stroke(); }
+});
+const roadCanvas = cv(128, 32, (g, w, h) => { g.fillStyle = "#1c1d24"; g.fillRect(0, 0, w, h); g.fillStyle = "#8a7432"; g.fillRect(8, 14, 44, 4); g.fillRect(72, 14, 44, 4); });
+// fachada: mesma grelha de janelas para a cor (map) e para o brilho (emissiveMap)
+const cells = (() => { const R = rnd(11), out = []; for (let y = 6; y < 122; y += 14) for (let x = 5; x < 60; x += 12) { const r = R() + .12; out.push({ x, y, r, warm: R() < .8 }); } return out; })();
+function facade(lit) {
+  return cv(64, 128, (g, w, h) => {
+    g.fillStyle = lit ? "#000" : "#1d2230"; g.fillRect(0, 0, w, h);
+    for (const c of cells) {
+      if (c.r < .3) g.fillStyle = lit ? (c.warm ? "#ffc773" : "#9fd6ff") : "#2a2a30";
+      else if (lit) continue; else g.fillStyle = c.r < .42 ? "#07080c" : "#141823";
+      g.fillRect(c.x, c.y, 6, 8);
+    }
+  });
+}
+const facadeMap = facade(false), facadeEmis = facade(true);
+let neonCanvas = null;
+function neonTex() {
+  if (!neonCanvas) neonCanvas = cv(256, 64, (g) => { g.font = "36px Silkscreen, monospace"; g.textBaseline = "middle"; g.shadowColor = "#3fe6ff"; g.shadowBlur = 14; g.fillStyle = "#bff6ff"; g.fillText("CINZAS", 16, 34); });
+  return tex(neonCanvas, 1, 1, false);
+}
+
+function tex(canvas, rx = 1, ry = 1, nearest = true) {
+  const t = new THREE.CanvasTexture(canvas);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry);
+  if (nearest) { t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; }
+  return t;
+}
+
+// ---------------------------------------------------------------- mundo partilhado
+function buildWorld(scene, { wideStreet = false } = {}) {
+  scene.background = new THREE.Color(0x0d0a14);
+  scene.fog = new THREE.FogExp2(0x1d0f19, 0.032);
+  scene.add(new THREE.HemisphereLight(0x5a5a8a, 0x1a0f12, 0.75));
+  const moonLight = new THREE.DirectionalLight(0x9a9aff, 0.45); moonLight.position.set(-6, 12, -10); scene.add(moonLight);
+
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(90, 50), new THREE.MeshLambertMaterial({ map: tex(asphaltCanvas, 30, 16) }));
+  ground.rotation.x = -Math.PI / 2; scene.add(ground);
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(90, 1.2), new THREE.MeshLambertMaterial({ map: tex(roadCanvas, 22, 1) }));
+  road.rotation.x = -Math.PI / 2; road.position.set(0, 0.005, 1.2); scene.add(road);
+  for (const z of [-3.6, 5.4]) {               // passeios
+    const kerb = new THREE.Mesh(new THREE.BoxGeometry(90, 0.18, 1.6), new THREE.MeshLambertMaterial({ color: 0x3a3f4b }));
+    kerb.position.set(0, 0.09, z); scene.add(kerb);
+  }
+  // prédios atrás (e alguns à frente, baixos, só onde a câmara não passa)
+  const R = rnd(7);
+  let x = -40;
+  while (x < 40) {
+    const w = 3 + R() * 3, h = 4 + R() * 10, d = 4 + R() * 2;
+    const m = new THREE.MeshLambertMaterial({ map: tex(facadeMap, w / 2, h / 4), emissive: 0xffffff, emissiveMap: tex(facadeEmis, w / 2, h / 4), emissiveIntensity: 0.6 });
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    b.position.set(x + w / 2, h / 2, -5.4 - d / 2 - R() * 1.5); scene.add(b);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + .3, .25, d + .3), new THREE.MeshLambertMaterial({ color: 0x3a4152 }));
+    cap.position.set(b.position.x, h, b.position.z); scene.add(cap);
+    x += w + 0.4 + R() * 1.2;
+  }
+  // skyline distante
+  for (let i = 0; i < 40; i++) {
+    const w = 3 + R() * 5, h = 10 + R() * 26;
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, 3), new THREE.MeshBasicMaterial({ color: 0x110f1a }));
+    b.position.set(-60 + i * 3.2, h / 2, -28 - R() * 10); scene.add(b);
+  }
+  // néon
+  const neon = new THREE.Mesh(new THREE.PlaneGeometry(3.2, .8), new THREE.MeshBasicMaterial({ map: neonTex(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  neon.position.set(-3.5, 5.2, -5.3); scene.add(neon);
+  const neonLight = new THREE.PointLight(0x3fe6ff, 1.2, 9); neonLight.position.set(-3.5, 4.6, -4.4); scene.add(neonLight);
+  // candeeiros com luz quente
+  const lamps = [];
+  for (const lx of [-10, -2, 6, 14]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.06, .08, 3.2, 6), new THREE.MeshLambertMaterial({ color: 0x2c3240 }));
+    pole.position.set(lx, 1.6, -3.2); scene.add(pole);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(.7, .08, .08), new THREE.MeshLambertMaterial({ color: 0x2c3240 }));
+    arm.position.set(lx + .3, 3.18, -3.2); scene.add(arm);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(.3, .1, .2), new THREE.MeshBasicMaterial({ color: 0xffe2a8 }));
+    head.position.set(lx + .6, 3.1, -3.2); scene.add(head);
+    const pl = new THREE.PointLight(0xffb35c, 1.3, 8, 1.6); pl.position.set(lx + .6, 2.9, -3.0); scene.add(pl);
+    lamps.push(pl);
+  }
+  // carro queimado a arder
+  const car = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, .6, 1.1), new THREE.MeshLambertMaterial({ color: 0x1f1b1a })); body.position.y = .5; car.add(body);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.2, .45, 1), new THREE.MeshLambertMaterial({ color: 0x171413 })); top.position.set(-.1, 1, 0); car.add(top);
+  car.position.set(10, 0, -1.6); car.rotation.y = .4; scene.add(car);
+  const fireLight = new THREE.PointLight(0xff6a2a, 2.2, 9, 1.4); fireLight.position.set(10, 1.6, -1.6); scene.add(fireLight);
+  const flames = [];
+  for (let i = 0; i < 6; i++) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex(glowCanvas, 1, 1, false), color: i % 2 ? 0xff8a3d : 0xffcf6b, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+    s.position.set(10 + (i - 2.5) * .22, 1.1, -1.6); scene.add(s); flames.push(s);
+  }
+  // lua
+  const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex(glowCanvas, 1, 1, false), color: 0xff8a7a, transparent: true, depthWrite: false, fog: false }));
+  moon.scale.set(16, 16, 1); moon.position.set(14, 22, -45); scene.add(moon);
+  const moonDisc = new THREE.Mesh(new THREE.CircleGeometry(2.2, 24), new THREE.MeshBasicMaterial({ color: 0xe8c8b8, fog: false }));
+  moonDisc.position.set(14, 22, -44.9); scene.add(moonDisc);
+  // cinzas a cair
+  const N = 380, pos = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) { pos[i * 3] = (Math.random() - .5) * 40; pos[i * 3 + 1] = Math.random() * 12; pos[i * 3 + 2] = (Math.random() - .5) * 20; }
+  const ashGeo = new THREE.BufferGeometry(); ashGeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const ash = new THREE.Points(ashGeo, new THREE.PointsMaterial({ color: 0x9a8c88, size: .06, transparent: true, opacity: .7 }));
+  scene.add(ash);
+  return {
+    update(t, dt) {
+      for (let i = 0; i < flames.length; i++) {
+        const f = flames[i], ph = t * (5 + i) + i;
+        const h = .9 + .45 * Math.sin(ph);
+        f.scale.set(.55, h * 1.2, 1); f.position.y = .9 + h * .5;
+        f.material.opacity = .65 + .3 * Math.sin(ph * 1.7);
+      }
+      fireLight.intensity = 2 + Math.sin(t * 13) * .35 + Math.sin(t * 29) * .2;
+      neonLight.intensity = Math.sin(t * 17) > -.9 ? 1.2 : .2; neon.material.opacity = neonLight.intensity / 1.2;
+      lamps[1].intensity = Math.sin(t * 23) > .1 && Math.sin(t * 3) > -.6 ? 1.3 : .1;   // um candeeiro avariado
+      const p = ashGeo.attributes.position.array;
+      for (let i = 0; i < N; i++) { p[i * 3 + 1] -= dt * (.3 + (i % 7) * .05); p[i * 3] += Math.sin(t + i) * dt * .1; if (p[i * 3 + 1] < 0) p[i * 3 + 1] = 12; }
+      ashGeo.attributes.position.needsUpdate = true;
+    },
+  };
+}
+
+// ---------------------------------------------------------------- personagens em sprite (pés na origem)
+function spriteActor(image, cols, rows) {
+  const t = new THREE.Texture(image); t.needsUpdate = true;
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter;
+  t.repeat.set(1 / cols, 1 / rows);
+  const w = FW / PPU, h = FH / PPU;
+  const geo = new THREE.PlaneGeometry(w, h); geo.translate(0, h / 2 - (FH - OY) / PPU, 0);
+  // cores originais da pixel art (sem nevoeiro nem sombreamento 3D, que as deixavam esbatidas)
+  const mat = new THREE.MeshBasicMaterial({ map: t, transparent: true, alphaTest: .5, side: THREE.DoubleSide, fog: false });
+  const mesh = new THREE.Mesh(geo, mat);
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(.45, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: .45, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2;
+  return {
+    mesh, shadow,
+    frame(row, col, flip) {
+      t.repeat.x = (flip ? -1 : 1) / cols;
+      t.offset.set((col + (flip ? 1 : 0)) / cols, 1 - (row + 1) / rows);
+    },
+  };
+}
+function beamFx(scene) {
+  const g = new THREE.Group();
+  const outer = new THREE.Mesh(new THREE.CylinderGeometry(.13, .13, 1, 10, 1, true), new THREE.MeshBasicMaterial({ color: 0xff2b3d, transparent: true, opacity: .5, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, 1, 8), new THREE.MeshBasicMaterial({ color: 0xffe6ea }));
+  outer.geometry.rotateX(Math.PI / 2); core.geometry.rotateX(Math.PI / 2);
+  g.add(outer, core);
+  const mk = (c, s) => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex(glowCanvas, 1, 1, false), color: c, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })); sp.scale.set(s, s, 1); scene.add(sp); return sp; };
+  const eyeGlow = mk(0xff4455, .9), hitGlow = mk(0xff6a5c, 1.8);
+  const light = new THREE.PointLight(0xff2b3d, 0, 7, 1.5);
+  scene.add(g, light);
+  return {
+    set(on, from, to, t) {
+      g.visible = eyeGlow.visible = hitGlow.visible = on; light.intensity = on ? 2.4 : 0;
+      if (!on) return;
+      const d = to.clone().sub(from), len = d.length();
+      g.position.copy(from).add(to).multiplyScalar(.5); g.lookAt(to); g.scale.set(1 + .15 * Math.sin(t * 60), 1 + .15 * Math.sin(t * 60), len);
+      eyeGlow.position.copy(from); hitGlow.position.copy(to); light.position.copy(to);
+      hitGlow.scale.setScalar(1.6 + .3 * Math.sin(t * 40));
+    },
+  };
+}
+// figura provisória 3D para a 3.ª pessoa (blocos com as cores do Kane)
+function blockKane() {
+  const gold = new THREE.MeshLambertMaterial({ color: 0xc8973f }), navy = new THREE.MeshLambertMaterial({ color: 0x1e2a44 }), black = new THREE.MeshLambertMaterial({ color: 0x15161c });
+  const g = new THREE.Group();
+  const box = (w, h, d, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); g.add(b); return b; };
+  const legL = new THREE.Group(), legR = new THREE.Group();
+  for (const [L, x] of [[legL, -.14], [legR, .14]]) { L.position.set(x, .85, 0); const th = new THREE.Mesh(new THREE.BoxGeometry(.2, .8, .22), black); th.position.y = -.4; L.add(th); const kn = new THREE.Mesh(new THREE.BoxGeometry(.21, .14, .24), navy); kn.position.y = -.45; L.add(kn); const bt = new THREE.Mesh(new THREE.BoxGeometry(.22, .14, .3), gold); bt.position.set(0, -.8, .04); L.add(bt); g.add(L); }
+  box(.52, .6, .3, navy, 0, 1.2, 0); box(.4, .3, .32, gold, 0, 1.32, .01); box(.56, .1, .32, gold, 0, .88, 0);
+  box(.2, .2, .3, gold, -.36, 1.48, 0); box(.2, .2, .3, gold, .36, 1.48, 0);
+  const armL = box(.14, .55, .16, black, -.36, 1.15, 0), armR = box(.14, .55, .16, black, .36, 1.15, 0);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(.17, 12, 10), gold); head.position.set(0, 1.72, 0); g.add(head);
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(.26, .06, .05), new THREE.MeshBasicMaterial({ color: 0xff3344 })); visor.position.set(0, 1.73, .15); g.add(visor);
+  const cape = new THREE.Mesh(new THREE.PlaneGeometry(.7, 1.1), new THREE.MeshLambertMaterial({ color: 0x1f2a33, side: THREE.DoubleSide })); cape.position.set(0, 1.0, -.2); cape.rotation.x = .15; g.add(cape);
+  return { group: g, legL, legR, armL, armR, cape, visor };
+}
+
+// ---------------------------------------------------------------- guião comum: anda, dispara, voa, paira, aterra (ciclo de 10 s)
+const TROOPER_X = 5.2;
+function script(t) {
+  const c = t % 10;
+  if (c < 3) return { x: -4 + c / 3 * 5.5, y: 0, mode: "walk", vx: 1 };
+  if (c < 5) return { x: 1.5, y: 0, mode: c > 3.3 && c < 4.8 ? "laser" : "idle", vx: 0 };
+  if (c < 7) { const u = (c - 5) / 2; return { x: 1.5 - u * 4.5, y: Math.sin(u * Math.PI / 2) * 2.6, mode: "fly", vx: -1 }; }
+  if (c < 8.5) return { x: -3, y: 2.6 + Math.sin(c * 3) * .08, mode: "hover", vx: 0 };
+  const u = (c - 8.5) / 1.5; return { x: -3 - u, y: 2.6 * (1 - u), mode: u < 1 ? "hover" : "idle", vx: 0 };
+}
+function kaneFrame(s, t) {
+  if (s.mode === "walk") return [0, Math.floor(t * 10) % 4];
+  if (s.mode === "laser") return [2, 0];
+  if (s.mode === "fly") return [1, [1, 2, 3, 2][Math.floor(t * 8) % 4]];
+  if (s.mode === "hover") return [0, Math.floor(t * 3) % 2];
+  return [0, 0];
+}
+
+// ---------------------------------------------------------------- uma vista
+function makeView(el, kind, kaneImg, troopImg) {
+  const canvas = el.querySelector("canvas");
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+  catch (e) { el.querySelector(".screen").insertAdjacentHTML("beforeend", '<div class="err">Este dispositivo não conseguiu abrir a cena 3D.</div>'); return null; }
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+  const scene = new THREE.Scene(), world = buildWorld(scene);
+  let camera;
+  if (kind === "iso") { camera = new THREE.OrthographicCamera(-6, 6, 4, -4, .1, 200); }
+  else camera = new THREE.PerspectiveCamera(kind === "side" ? 38 : kind === "tps" ? 55 : 34, 16 / 10, .1, 200);
+
+  const trooper = spriteActor(troopImg, 5, 3);
+  trooper.mesh.position.set(TROOPER_X, 0, kind === "side" ? 0 : -.6); trooper.shadow.position.set(TROOPER_X, .02, trooper.mesh.position.z);
+  scene.add(trooper.mesh, trooper.shadow);
+  let kane = null, block = null;
+  if (kind === "tps") { block = blockKane(); scene.add(block.group); }
+  else { kane = spriteActor(kaneImg, 4, 3); scene.add(kane.mesh, kane.shadow); }
+  const beam = beamFx(scene);
+  const visorLight = new THREE.PointLight(0xff3344, .6, 2.5); scene.add(visorLight);
+
+  const resize = () => {
+    const r = canvas.getBoundingClientRect(); if (!r.width) return;
+    renderer.setSize(r.width, r.height, false);
+    if (camera.isPerspectiveCamera) camera.aspect = r.width / r.height;
+    else { const a = r.width / r.height, hh = 4.2; camera.left = -hh * a; camera.right = hh * a; camera.top = hh; camera.bottom = -hh; }
+    camera.updateProjectionMatrix();
+  };
+  resize(); addEventListener("resize", resize);
+
+  const right = new THREE.Vector3(), tmp = new THREE.Vector3();
+  let visible = true;
+  new IntersectionObserver(es => { visible = es[0].isIntersecting; }).observe(el);
+  return {
+    get visible() { return visible; },
+    step(t, dt) {
+      const s = script(t);
+      const z = kind === "side" ? 0 : (kind === "tps" ? 0 : Math.sin(t * .6) * .9);
+      const kp = new THREE.Vector3(s.x, s.y, z);
+      // câmaras
+      if (kind === "hd2d") { camera.position.set(kp.x - 1.2, 5.6 + s.y * .3, kp.z + 9.5); camera.lookAt(kp.x + 1.2, 1 + s.y * .5, kp.z - .5); }
+      else if (kind === "iso") { camera.position.set(kp.x + 1 + 12, 12, kp.z + 12); camera.lookAt(kp.x + 1, 0, kp.z); }
+      else if (kind === "side") { camera.position.set(kp.x + 1.5, 2.3 + s.y * .4, 10.5); camera.lookAt(kp.x + 1.5, 1.6 + s.y * .4, 0); }
+      else { const back = s.vx < 0 ? -1 : 1; camera.position.set(kp.x - 4.2 * back, 2.4 + s.y, z + 1.6); camera.lookAt(kp.x + 3 * back, 1.3 + s.y * .8, z - .2); }
+      camera.updateMatrixWorld();
+      right.setFromMatrixColumn(camera.matrixWorld, 0);
+      // direção para onde olha: o soldado quando dispara/está parado, senão a direção do movimento
+      const dir = s.vx !== 0 ? Math.sign(s.vx) : 1;
+      if (kane) {
+        const [row, col] = kaneFrame(s, t);
+        const flip = right.x * dir < 0;
+        kane.frame(row, col, flip);
+        kane.mesh.position.copy(kp);
+        kane.mesh.quaternion.copy(camera.quaternion);               // sprite sempre de frente para a câmara
+        if (kind === "hd2d" || kind === "side") { kane.mesh.rotation.set(0, Math.atan2(camera.position.x - kp.x, camera.position.z - kp.z), 0); }
+        kane.shadow.position.set(kp.x, .02, kp.z); kane.shadow.scale.setScalar(1 - Math.min(s.y, 2.6) * .22);
+        trooper.mesh.rotation.copy(kane.mesh.rotation); if (kind === "iso") trooper.mesh.quaternion.copy(camera.quaternion);
+      } else {
+        const b = block; b.group.position.copy(kp); b.group.rotation.y = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+        const sw = s.mode === "walk" ? Math.sin(t * 10) * .6 : 0;
+        b.legL.rotation.x = sw; b.legR.rotation.x = -sw; b.armL.rotation.x = -sw * .7; b.armR.rotation.x = sw * .7;
+        b.group.rotation.z = 0; b.group.children.forEach(() => {}); b.group.rotation.x = 0;
+        if (s.mode === "fly") { b.group.rotation.x = 0; b.group.rotation.z = 0; b.group.rotateX(1.1); }
+        b.cape.rotation.x = .15 + (s.mode === "walk" ? .25 : s.mode === "fly" ? .9 : 0) + Math.sin(t * 6) * .05;
+        trooper.mesh.rotation.set(0, Math.atan2(camera.position.x - TROOPER_X, camera.position.z - trooper.mesh.position.z), 0);
+      }
+      const tf = right.x > 0 ? true : false;   // soldado olha para o Kane (para a esquerda)
+      trooper.frame(0, s.mode === "laser" ? 1 : 0, tf);
+      trooper.mesh.material.color.setHex(s.mode === "laser" && Math.sin(t * 40) > 0 ? 0xffb0b0 : 0xffffff);
+      // laser dos olhos até ao soldado
+      const eye = kane ? kp.clone().add(right.clone().multiplyScalar(12 / PPU * (right.x * dir < 0 ? -1 : 1))).add(tmp.set(0, 97 / PPU, 0))
+                       : kp.clone().add(tmp.set(.16 * dir, 1.73, 0));
+      const hit = new THREE.Vector3(TROOPER_X, 1.1, trooper.mesh.position.z);
+      beam.set(s.mode === "laser", eye, hit, t);
+      visorLight.position.copy(eye); visorLight.intensity = s.mode === "laser" ? 1.5 : .5;
+      world.update(t, dt);
+      renderer.render(scene, camera);
+    },
+  };
+}
+
+// ---------------------------------------------------------------- arranque
+const load = src => new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = src; });
+Promise.all([load(KANE_SRC), load(TROOPER_SRC), document.fonts ? document.fonts.ready : Promise.resolve()]).then(([kImg, tImg]) => {
+  if (!window.THREE) { document.querySelectorAll(".screen").forEach(s => s.insertAdjacentHTML("beforeend", '<div class="err">Não foi possível carregar o motor 3D.</div>')); return; }
+  const views = [["v-hd2d", "hd2d"], ["v-iso", "iso"], ["v-side", "side"], ["v-tps", "tps"]].map(([id, kind]) => makeView(document.getElementById(id), kind, kImg, tImg)).filter(Boolean);
+  let last = performance.now(), t = 0;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function frame(now) {
+    const dt = Math.min(.05, (now - last) / 1000); last = now; t += reduce ? dt * .4 : dt;
+    for (const v of views) if (v.visible) v.step(t, dt);
+    requestAnimationFrame(frame);
+  }
+  // primeiro frame imediato para a página não abrir vazia
+  for (const v of views) v.step(1.2, .016);
+  requestAnimationFrame(frame);
+});
+</script>
