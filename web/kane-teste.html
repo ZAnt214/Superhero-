@@ -107,7 +107,7 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
 // ---------------------------------------------------------------- configuração
 const C = {
   maxHp: 300, maxFury: 100, furyRegen: 8, invuln: 0.6,
-  runSpeed: 220, groundAccel: 1800, groundFriction: 2400, airAccel: 1100,
+  runSpeed: 220, groundAccel: 2600, groundFriction: 3200, airAccel: 1300,
   gravity: 1400, fallMult: 1.5, maxFall: 900, jumpVel: -480, jumpCut: 0.45,
   coyote: 0.1, jumpBuffer: 0.12,
   flightSpeed: 320, flightAccel: 1600,
@@ -132,6 +132,8 @@ const C = {
   backMult: 0.65, blockChip: 0.15, dashSpeed: 720, dashTime: 0.18, dashCd: 0.45, roundTime: 99,
 };
 // Pontos medidos nos frames (assets/kane/kane_points.json), relativos aos pés, a olhar para a direita.
+// tempos do soco (s): jab sai logo ao carregar; o de energia tem mais preparação e recuperação
+const PUNCH_JAB = { w: 0.05, a: 0.08, r: 0.15 }, PUNCH_HEAVY = { w: 0.09, a: 0.1, r: 0.26 };
 const PT = {
   eyeGuard: { x: 12, y: -97 }, eyeIdle: { x: 10, y: -114 },
   fistGuard: { x: 34, y: -64 }, fistPunch: { x: 56, y: -72 },
@@ -563,7 +565,7 @@ const k = {
   flying: false, onFloor: false, action: "none", t: 0, coyote: 0, jumpBuf: 0, invuln: 0,
   laserTick: 0, energy: false, hitIds: new Set(), beam: null, beamFade: 0, lastBeam: null, aim: null,
   anim: 0, dead: false, moveAnim: false, squash: 0, stretch: 0, turnT: 0, rot: 0, flyPose: false, laserSound: false,
-  laserPow: 0, laserLevel: 1, maxTime: 0, stun: 0, blocking: false, dashT: 0, dashDir: 1, dashCd: 0, airDash: false, hpTrail: 300, exhausted: false, exhaustT: 0, kneel: 0, kneelLanded: false, pantT: 0, weak: false,
+  laserPow: 0, laserLevel: 1, maxTime: 0, stun: 0, blocking: false, dashT: 0, dashDir: 1, dashCd: 0, airDash: false, hpTrail: 300, pt: PUNCH_JAB, walkPh: 0, exhausted: false, exhaustT: 0, kneel: 0, kneelLanded: false, pantT: 0, weak: false,
   hurtFlash: 0, whiteFlash: 0, chargedPing: false, stepT: 0, ghostT: 0, scorchT: 0,
 };
 let floats = [], time = 0, hitstop = 0;
@@ -572,10 +574,11 @@ const fight = { phase: "intro", t: 0, round: 1, kWins: 0, fWins: 0, timer: 99, c
 function resetFighters() {
   Object.assign(k, { x: 650, y: FLOOR_Y, vx: 0, vy: 0, facing: 1, hp: C.maxHp, hpTrail: C.maxHp, dead: false, invuln: 0, action: "none", t: 0,
     stun: 0, blocking: false, dashT: 0, dashCd: 0, kneel: 0, exhausted: false, exhaustT: 0, laserPow: 0, laserLevel: 1, maxTime: 0,
-    beam: null, lastBeam: null, beamFade: 0, aim: null, hurtFlash: 0, whiteFlash: 0, rot: 0, squash: 0, stretch: 0 });
+    beam: null, lastBeam: null, beamFade: 0, aim: null, hurtFlash: 0, whiteFlash: 0, rot: 0, squash: 0, stretch: 0, pt: PUNCH_JAB });
   Object.assign(foe, { x: 1150, y: FLOOR_Y, vx: 0, vy: 0, facing: -1, hp: foe.maxHp, dead: 0, deathT: 0, state: "neutral", st: 0, cd: 1.4, recoil: 0, flash: 0 });
   fight.foeTrail = foe.maxHp; bolts.length = 0; decals.length = 0; ghosts.length = 0;
   SFX.loopStop("laser", 0.05); SFX.loopStop("charge", 0.05);
+  snapPrev();
 }
 function startRound(n) {
   resetFighters();
@@ -1026,10 +1029,14 @@ function pollGamepad() {
     gpHeld.up ||= b(12); gpHeld.down ||= b(13); gpHeld.left ||= b(14); gpHeld.right ||= b(15);
   }
 }
+// Buffer de comandos: um botão carregado até 0,15 s antes de o Kane poder agir não se perde.
+const lastPress = { jump: -9, punch: -9, laser: -9, fly: -9 }, bufPrev = {};
 function syncInput() {
   pollGamepad();
   for (const n of ["jump", "punch", "laser", "fly", "left", "right", "up", "down"]) held[n] = !!(evHeld[n] || gpHeld[n]);
+  for (const n in lastPress) { if (held[n] && !bufPrev[n]) lastPress[n] = time; bufPrev[n] = held[n]; }
 }
+function want(n, win = 0.15) { if (time - lastPress[n] <= win) { lastPress[n] = -9; return true; } return false; }
 
 // ---------------------------------------------------------------- física
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -1118,8 +1125,12 @@ function updateTrooper(e, dt) {
   e.flash = Math.max(e.flash - dt, 0); e.squash = Math.max(e.squash - dt, 0); e.recoil = Math.max(0, e.recoil - dt * 40);
   if (e.dead > 0) { trooperDeathUpdate(e, dt); return; }
   e.st += dt; e.anim += dt; e.cd -= dt;
+  e.walkPh = (e.walkPh || 0) + Math.abs(e.vx) * dt * 0.05; e.turnT = Math.max(0, (e.turnT || 0) - dt);
   const dx = k.x - e.x, adx = Math.abs(dx);
-  if (e.onFloor && e.state !== "charge" && e.state !== "fire" && e.state !== "aim") e.facing = Math.sign(dx) || e.facing;
+  if (e.onFloor && e.state !== "charge" && e.state !== "fire" && e.state !== "aim") {
+    const f = Math.sign(dx) || e.facing;
+    if (f !== e.facing) { e.facing = f; e.turnT = 0.1; }
+  }
   let target = 0;
   const active = fight.phase === "fight" && !k.dead;
   if (!active && e.state !== "hitstun" && e.state !== "stagger") e.state = "neutral";
@@ -1232,7 +1243,7 @@ function distToBeam(px, py, bm) {
   return Math.hypot(px - (bm.ox + bm.dx * t), py - (bm.oy + bm.dy * t));
 }
 function updateBolts(dt) {
-  const fist = k.action === "punch" && k.t >= C.punchWindup * 0.4 && k.t < C.punchWindup + C.punchActive + 0.06 ? local({ x: PT.fistPunch.x, y: PT.fistPunch.y }) : null;
+  const fist = k.action === "punch" && k.t >= k.pt.w * 0.4 && k.t < k.pt.w + k.pt.a + 0.06 ? local({ x: PT.fistPunch.x, y: PT.fistPunch.y }) : null;
   for (let i = bolts.length - 1; i >= 0; i--) {
     const b = bolts[i];
     b.life -= dt; b.x += b.vx * dt; b.y += b.vy * dt;
@@ -1322,10 +1333,10 @@ function trooperDeathUpdate(e, dt) {
 function trooperFrame(e) {
   if (e.dead > 0) return [2, Math.min(4, Math.floor(e.deathT / 0.13))];
   if (e.state === "aim" || e.state === "fire" || e.state === "cool") return [0, 1];
-  if (e.state === "charge") return [1, Math.floor(e.anim * 14) % 4];
+  if (e.state === "charge") return [1, Math.floor(e.walkPh * 1.3) % 4];
   if (e.state === "windup") return [1, 0];
   if (e.state === "hitstun" || e.state === "stagger") return [2, 0];   // frame do primeiro impacto da derrota = reação ao golpe
-  if (Math.abs(e.vx) > 30) return [1, Math.floor(e.anim * (Math.abs(e.vx) > 80 ? 9 : 6)) % 4];
+  if (Math.abs(e.vx) > 30) return [1, Math.floor(e.walkPh * 1.3) % 4];   // passada acompanha a velocidade real
   return [0, 0];
 }
 function drawTrooper(e) {
@@ -1336,7 +1347,8 @@ function drawTrooper(e) {
   ctx.save();
   const shake = e.state === "stagger" || e.state === "windup" || (e.state === "hitstun" && e.st < 0.1) ? rand(-2, 2) : 0;
   ctx.translate(e.x - e.recoil * e.facing + shake, e.y);
-  ctx.scale(e.facing * (1 + sq * 0.1), 1 - sq * 0.08 + breathe);
+  const turn = e.turnT > 0 ? 0.4 + 0.6 * (1 - e.turnT / 0.1) : 1;
+  ctx.scale(e.facing * turn * (1 + sq * 0.1), 1 - sq * 0.08 + breathe);
   ctx.globalAlpha = fade;
   ctx.drawImage(TROOPER, col * FW, row * FH, FW, FH, -OX, -OY, FW, FH);
   ADD();
@@ -1355,7 +1367,7 @@ function drawTrooper(e) {
 
 // ---------------------------------------------------------------- Kane: pontos no mundo
 // ponto do sprite → mundo, com a mesma rotação do corpo usada no desenho
-function pivotFor(pose) { return pose === "fly" ? PT.pivotFly : pose === "run" || pose === "ground" ? { x: 0, y: 0 } : PT.pivotBody; }
+function pivotFor(pose) { return pose === "fly" ? PT.pivotFly : pose === "run" || pose === "ground" || pose === "walk" || pose === "stance" ? { x: 0, y: 0 } : PT.pivotBody; }
 function local(p) {
   const pv = pivotFor(kaneFrame()[2]), c = Math.cos(k.rot), sn = Math.sin(k.rot);
   const dx = p.x - pv.x, dy = p.y - pv.y;
@@ -1423,8 +1435,8 @@ function updateKane(dt) {
   // sem controlo: ajoelhado, atordoado por um golpe, ou fora do tempo de luta (apresentação / K.O.)
   const locked = k.exhausted || k.kneel > 0.3 || k.stun > 0 || fight.phase !== "fight";
   const inp = locked ? { x: 0, y: 0 } : inputVec();
-  if (!locked && pressed("jump")) k.jumpBuf = C.jumpBuffer;
-  if (!locked && pressed("fly") && k.dashCd <= 0 && !(k.airDash && !k.onFloor) && (k.action === "none" || k.action === "punch")) startDash(inp);
+  if (!locked && want("jump")) k.jumpBuf = C.jumpBuffer;
+  if (!locked && k.dashCd <= 0 && !(k.airDash && !k.onFloor) && (k.action === "none" || k.action === "punch") && want("fly")) startDash(inp);
   // como nos jogos de luta: no chão está sempre virado para o adversário (no ar mantém o lado)
   if (k.onFloor && (k.action === "none" || k.action === "charge") && !foe.dead) {
     const f = foe.x >= k.x ? 1 : -1;
@@ -1438,27 +1450,22 @@ function updateKane(dt) {
   const wasFloor = k.onFloor, fallSpeed = k.vy;
   k.t += dt; k.beam = null;
   if (k.action === "none") {
-    if (!locked && pressed("laser")) {
+    if (!locked && want("laser")) {
       start("laser"); k.laserTick = 0; k.lastBeam = null; k.laserSound = false; k.maxTime = 0;
       k.laserLevel = powerLevel(k.laserPow);   // potência que ainda resta continua a contar
       SFX.play("laserStart");
-    } else if (!locked && pressed("punch")) { start("charge"); SFX.loopStart("charge"); }
+    } else if (!locked && want("punch")) startPunch(false);
   } else if (k.action === "charge") {
     chargeFx(dt);
-    if (!held.punch) {
-      k.chargedPing = false;
-      SFX.loopStop("charge", 0.06);
-      k.energy = k.t >= C.chargeTime;
-      k.hitIds.clear(); start("punch");
-      k.vx += k.facing * C.punchLunge * (k.energy ? 1.5 : 1);
-      SFX.play("whoosh", k.energy);
-    }
+    if (!held.punch || locked) { k.chargedPing = false; SFX.loopStop("charge", 0.06); if (!locked) startPunch(k.t >= C.chargeTime); else start("none"); }
   } else if (k.action === "punch") {
+    // segurar o botão depois do jab passa para a carga do soco de energia
+    if (!k.energy && held.punch && !locked && k.t >= 0.16) { start("charge"); SFX.loopStart("charge"); }
     // combo: depois de acertar, um novo soco cancela a recuperação
-    if (!locked && pressed("punch") && k.hitIds.size && k.t >= C.punchWindup + C.punchActive * 0.5) { start("charge"); SFX.loopStart("charge"); }
-    else if (k.t >= C.punchWindup && k.t - dt < C.punchWindup) punchImpactFx();
-    if (k.action === "punch" && k.t >= C.punchWindup && k.t < C.punchWindup + C.punchActive) punchQuery();
-    if (k.action === "punch" && k.t >= C.punchWindup + C.punchActive + C.punchRecovery) start("none");
+    else if (!locked && k.hitIds.size && k.t >= k.pt.w + k.pt.a * 0.5 && want("punch")) startPunch(false);
+    else if (k.t >= k.pt.w && k.t - dt < k.pt.w) punchImpactFx();
+    if (k.action === "punch" && k.t >= k.pt.w && k.t < k.pt.w + k.pt.a) punchQuery();
+    if (k.action === "punch" && k.t >= k.pt.w + k.pt.a + k.pt.r) start("none");
   } else if (k.action === "laser") {
     const dir = aimDir(inp); laserAimDy = dir.dy;
     const eye = eyeWorld();
@@ -1516,6 +1523,11 @@ function updateKane(dt) {
       k.x = clamp(k.x + push, ARENA_L + 14, ARENA_R - 14); foe.x = clamp(foe.x - push, ARENA_L + 22, ARENA_R - 22);
     }
   }
+}
+function startPunch(energy) {
+  k.energy = energy; k.pt = energy ? PUNCH_HEAVY : PUNCH_JAB; k.hitIds.clear(); start("punch");
+  k.vx += k.facing * C.punchLunge * (energy ? 1.5 : 0.6);
+  SFX.play("whoosh", energy);
 }
 function startDash(inp) {
   const dir = Math.abs(inp.x) > 0.2 ? Math.sign(inp.x) : k.facing;
@@ -1614,7 +1626,7 @@ function kaneFrame() {
   if (k.action === "laser" && (k.flying || !k.onFloor)) return [ROW.idle, 0, "airLaser"];
   if (k.action === "laser" || k.action === "charge") return [ROW.punch, 0, "attack"];
   if (k.action === "punch") {
-    const t = k.t, w = C.punchWindup, a = C.punchActive, r = C.punchRecovery;
+    const t = k.t, w = k.pt.w, a = k.pt.a, r = k.pt.r;
     if (t < w) return [ROW.punch, 0, "attack"];
     if (t < w + a + r * 0.4) return [ROW.punch, 1, "attack"];
     if (t < w + a + r * 0.75) return [ROW.punch, 2, "attack"];
@@ -1627,8 +1639,9 @@ function kaneFrame() {
     return [ROW.idle, Math.floor(k.anim * 3) % 2, "hover"];
   }
   if (!k.onFloor) return [ROW.idle, k.vy < 0 ? 2 : 3, "air"];
-  if (k.moveAnim) return [ROW.idle, Math.floor(k.anim * 12) % 4, "run"];
-  return [ROW.idle, 0, "ground"];   // parado: frame com os dois pés no chão + respiração (drawPose)
+  // em luta: sempre em guarda; a andar, a guarda baloiça com os passos (kaneTransform)
+  if (k.moveAnim) return [ROW.punch, 0, "walk"];
+  return [ROW.punch, 0, "stance"];
 }
 
 // ---------------------------------------------------------------- VFX: movimento
@@ -1644,6 +1657,7 @@ function movementFx(dt, wasFloor, fallSpeed, jumped) {
   if (pose === "fly") rotTarget = clamp(Math.atan2(k.vy, Math.abs(k.vx)) * 0.85, -0.75, 0.75);   // aponta para onde voa
   else if (pose === "hover") rotTarget = clamp(k.vx * k.facing / C.flightSpeed * 0.35, -0.2, 0.3) + clamp(-k.vy / C.flightSpeed, -1, 1) * 0.05;
   else if (pose === "run") rotTarget = 0.1 * Math.min(Math.abs(k.vx) / C.runSpeed, 1);
+  else if (pose === "walk") rotTarget = 0.07 * Math.sign(k.vx * k.facing) * Math.min(Math.abs(k.vx) / C.runSpeed, 1);   // inclina para onde anda
   else if (pose === "air") rotTarget = clamp(k.vx * k.facing / C.runSpeed * 0.08, -0.08, 0.08);
   else if (pose === "hurt") rotTarget = -0.18;
   else if (pose === "block") rotTarget = -0.04;
@@ -1665,9 +1679,10 @@ function movementFx(dt, wasFloor, fallSpeed, jumped) {
       addTrauma(0.2 + heavy * 0.25, 0, 4);
     }
   }
-  if (pose === "run") {   // pó nos passos
-    k.stepT += dt;
-    if (k.stepT > 1 / 6) { k.stepT = 0; SFX.play("step"); for (let i = 0; i < 2; i++) emit("dust", k.x - 10 * k.facing, k.y - 3, -k.facing * rand(30, 80), rand(-35, -10), rand(0.35, 0.55), rand(5, 7), 12, "back"); }
+  // fase da passada avança com a distância percorrida (não com o tempo): pés não "patinam"
+  const lastPh = k.walkPh; k.walkPh += Math.abs(k.vx) * dt * 0.05;
+  if (pose === "walk" || pose === "run") {   // pó e som em cada passo (meia volta da fase)
+    if (Math.floor(k.walkPh / Math.PI) !== Math.floor(lastPh / Math.PI)) { SFX.play("step"); for (let i = 0; i < 2; i++) emit("dust", k.x - 10 * k.facing, k.y - 3, -k.facing * rand(30, 80), rand(-35, -10), rand(0.35, 0.55), rand(5, 7), 12, "back"); }
   }
   if (k.flying) flightFx(dt, pose);
 }
@@ -1907,7 +1922,9 @@ function drawEnemy(e) {
 const ghosts = [];
 function kaneTransform(pose) {
   const hover = pose === "hover" ? Math.sin(k.anim * 3) * 3 : 0;
-  const runBob = pose === "run" ? -Math.abs(Math.sin(k.anim * Math.PI * 6)) * 3 : 0;
+  const runBob = pose === "run" ? -Math.abs(Math.sin(k.anim * Math.PI * 6)) * 3
+    : pose === "walk" ? -Math.abs(Math.sin(k.walkPh)) * 2.4
+    : pose === "stance" ? Math.sin(time * 4.2) * 0.9 : 0;                 // guarda: saltitar leve como nos jogos de luta
   const breath = 0;
   const sq = k.squash / 0.12, st = k.stretch / 0.14;
   const turn = k.turnT > 0 ? 0.35 + 0.65 * (1 - k.turnT / 0.09) : 1;   // vira com um "achatar" rápido
@@ -1917,7 +1934,7 @@ function kaneTransform(pose) {
   if (k.rot) { const pv = pivotFor(pose); ctx.translate(pv.x, pv.y); ctx.rotate(k.rot); ctx.translate(-pv.x, -pv.y); }
   if (k.action === "punch") {
     const t = k.t;
-    ctx.translate(t < C.punchWindup ? -6 * easeOut(t / C.punchWindup) : t < C.punchWindup + C.punchActive ? 6 : 6 * (1 - Math.min(1, (t - C.punchWindup - C.punchActive) / C.punchRecovery)), 0);
+    ctx.translate(t < k.pt.w ? -6 * easeOut(t / k.pt.w) : t < k.pt.w + k.pt.a ? 6 : 6 * (1 - Math.min(1, (t - k.pt.w - k.pt.a) / k.pt.r)), 0);
   }
   if (k.dead) ctx.rotate(-1.3);
 }
@@ -1925,9 +1942,10 @@ function drawSprite(img, row, col, x = -OX, y = -OY) { ctx.drawImage(img, col * 
 // Pose de joelhos gerada a partir da guarda: pernas comprimidas a partir dos pés (joelho dobrado)
 // e tronco a descer, cabeça baixa e a arfar. Transição contínua com k.kneel (0 → 1).
 function drawPose(img, row, col, pose, ox = 0, oy = 0) {
-  if (pose === "ground") {
+  if (pose === "ground" || pose === "stance" || pose === "walk" || pose === "block") {
     // respiração: só o tronco sobe e desce (pernas fixas no chão), com ombros a abrir ligeiramente
-    const br = Math.sin(time * 2.4) * 0.5 + 0.5, CHEST = -62;
+    const amp = pose === "walk" ? 0.5 : pose === "block" ? 0.3 : 1;
+    const br = (Math.sin(time * (pose === "stance" ? 3 : 2.4)) * 0.5 + 0.5) * amp, CHEST = row === ROW.punch ? -56 : -62;
     ctx.save(); ctx.beginPath(); ctx.rect(-OX, CHEST, FW, -CHEST + 8); ctx.clip();
     drawSprite(img, row, col, -OX + ox, -OY + oy); ctx.restore();
     ctx.save(); ctx.beginPath(); ctx.rect(-OX, -OY - 10, FW, OY + 10 + CHEST); ctx.clip();
@@ -2045,8 +2063,8 @@ function drawKaneFront(row, col, pose) {
     glow(PT.fistGuard.x, PT.fistGuard.y, (8 + grow * 18) * p, charged ? PAL.cyan : PAL.red, 1, true);
     glow(PT.fistGuard.x, PT.fistGuard.y, (3 + grow * 6) * p, PAL.white, 1, true);
   }
-  if (k.action === "punch" && k.t >= C.punchWindup * 0.5) {
-    const t = (k.t - C.punchWindup * 0.5) / (C.punchActive + C.punchRecovery * 0.6), E = k.energy;
+  if (k.action === "punch" && k.t >= k.pt.w * 0.5) {
+    const t = (k.t - k.pt.w * 0.5) / (k.pt.a + k.pt.r * 0.6), E = k.energy;
     if (t < 1) {
       // arco de "smear" do braço + clarão do punho
       const a = 1 - t;
@@ -2247,18 +2265,19 @@ function srand(seed) { const x = Math.sin(seed * 127.1) * 43758.5453; return x -
 // ---------------------------------------------------------------- render
 let camView = { S: 1, cx: 0, cy: 0 };
 function worldToScreen(x, y) { return { x: (x - camView.cx) * camView.S + cv.width / 2, y: (y - camView.cy) * camView.S + cv.height / 2 }; }
-function render() {
+function render(rdt = 1 / 60) {
+  const ease = r => 1 - Math.exp(-rdt * r);   // suavização igual a qualquer taxa de imagens
   // câmara de jogo de luta: enquadra os dois lutadores, aproxima quando estão perto, zoom nos impactos
   const dist = Math.abs(k.x - foe.x);
   const wantW = clamp(dist + 460, 620, Math.max(620, viewW));
-  cam.zoom += (clamp(viewW / wantW, 1, 1.4) - cam.zoom) * 0.06;
+  cam.zoom += (clamp(viewW / wantW, 1, 1.4) - cam.zoom) * ease(3.6);
   const zoom = cam.zoom + cam.kick;
   const visW = viewW / zoom, visH = viewH / zoom;
   const midX = (k.x + foe.x) / 2;
-  cam.x += (clamp(midX, visW / 2, WORLD_W - visW / 2) - cam.x) * 0.1;
+  cam.x += (clamp(midX, visW / 2, WORLD_W - visW / 2) - cam.x) * ease(6.5);
   const highest = Math.min(k.y, foe.y);
   const lookY = FLOOR_Y + 70 - visH / 2 - Math.max(0, FLOOR_Y - highest - visH * 0.45) * 0.8;
-  cam.y += (lookY - cam.y) * 0.1;
+  cam.y += (lookY - cam.y) * ease(6.5);
   const tr = cam.trauma * cam.trauma, n = time * 30 + cam.seed;
   const shx = tr * 16 * (Math.sin(n * 1.7) + Math.sin(n * 3.1) * 0.5) + cam.dirX * tr;
   const shy = tr * 12 * (Math.sin(n * 2.3 + 1) + Math.sin(n * 4.3) * 0.5) + cam.dirY * tr;
@@ -2308,10 +2327,17 @@ function render() {
 // ---------------------------------------------------------------- loop (passo fixo 60 Hz)
 let last = performance.now(), acc = 0;
 const STEP = 1 / 60;
+// posições do passo anterior, para desenhar entre passos da física (fluido a 90/120 Hz)
+function snapPrev() {
+  k.px = k.x; k.py = k.y; foe.px = foe.x; foe.py = foe.y;
+  for (const b of bolts) { b.px = b.x; b.py = b.y; }
+}
 function frame(now) {
-  acc += Math.min((now - last) / 1000, 0.1); last = now;
+  const rdt = Math.min((now - last) / 1000, 0.1);
+  acc += rdt; last = now;
   while (acc >= STEP) {
     time += STEP;
+    snapPrev();
     syncInput();
     updateFight(STEP);
     const dtg = fight.phase === "ko" && fight.t < 1.4 ? STEP * 0.3 : STEP;   // K.O. em câmara lenta
@@ -2329,7 +2355,14 @@ function frame(now) {
     cam.kick = Math.max(0, cam.kick - STEP * 0.35);
     acc -= STEP;
   }
-  render();
+  // desenha na posição interpolada entre o passo anterior e o atual
+  const al = acc / STEP, save = [k.x, k.y, foe.x, foe.y];
+  if (k.px !== undefined) { k.x = lerp(k.px, k.x, al); k.y = lerp(k.py, k.y, al); foe.x = lerp(foe.px, foe.x, al); foe.y = lerp(foe.py, foe.y, al); }
+  const bsave = bolts.map(b => [b.x, b.y]);
+  for (const b of bolts) if (b.px !== undefined) { b.x = lerp(b.px, b.x, al); b.y = lerp(b.py, b.y, al); }
+  render(rdt);
+  [k.x, k.y, foe.x, foe.y] = save;
+  bolts.forEach((b, i) => { b.x = bsave[i][0]; b.y = bsave[i][1]; });
   requestAnimationFrame(frame);
 }
 startRound(1);
