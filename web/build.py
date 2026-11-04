@@ -11,7 +11,7 @@ game = game.replace("/*__LEVEL__*/", (root / "src/arena.js").read_text())   # ar
 def uri(name):
     return '"data:image/png;base64,' + base64.b64encode((root / name).read_bytes()).decode() + '"'
 assert "/*__GAME__*/" in shell and '"__ATLAS__"' in game and '"__TROOPER__"' in game
-game = game.replace('"__ATLAS__"', uri("kane_atlas.png")).replace('"__TROOPER__"', uri("trooper_atlas.png"))
+game = game.replace('"__ATLAS__"', uri("kane_atlas.png")).replace('"__TROOPER__"', uri("trooper_atlas.png")).replace('"__KANEFIGHT__"', uri("kane_fight_atlas.png"))
 out = shell.replace("/*__GAME__*/", game)
 (root / "kane-teste.html").write_text(out)
 print(f"kane-teste.html: {len(out) // 1024} KB")

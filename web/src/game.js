@@ -37,7 +37,12 @@ const C = {
 };
 // Pontos medidos nos frames (assets/kane/kane_points.json), relativos aos pés, a olhar para a direita.
 // tempos do soco (s): jab sai logo ao carregar; o de energia tem mais preparação e recuperação
-const PUNCH_JAB = { w: 0.05, a: 0.08, r: 0.15 }, PUNCH_HEAVY = { w: 0.09, a: 0.1, r: 0.26 };
+// tipos de golpe: tempos (s), caixa de acerto (relativa aos pés), dano, ponto do FX e frames [preparação, ativo, recuperação]
+const PUNCH_JAB = { w: 0.05, a: 0.08, r: 0.15, dmg: 18, box: { x: 42, y: -72, w: 64, h: 56 }, fx: { x: 58, y: -70 }, frames: ["walk2", "jab0", "jab1"], lunge: 0.6 };
+const PUNCH_HEAVY = { w: 0.09, a: 0.1, r: 0.26, dmg: 18, box: { x: 42, y: -72, w: 64, h: 56 }, fx: { x: 64, y: -74 }, frames: ["special0", "special1", "special1"], lunge: 1.5 };
+const PUNCH_LOW = { w: 0.05, a: 0.08, r: 0.16, dmg: 14, box: { x: 44, y: -52, w: 70, h: 40 }, fx: { x: 52, y: -57 }, frames: ["lowJab0", "lowJab1", "lowJab0"], lunge: 0.3 };
+const PUNCH_SWEEP = { w: 0.08, a: 0.12, r: 0.3, dmg: 24, box: { x: 62, y: -22, w: 110, h: 36 }, fx: { x: 104, y: -26 }, frames: ["sweep0", "sweep0", "sweep1"], lunge: 1.1, stagger: true, low: true };
+const PUNCH_AIR = { w: 0.06, a: 0.16, r: 0.1, dmg: 22, box: { x: 30, y: -45, w: 74, h: 62 }, fx: { x: 40, y: -42 }, frames: ["air1", "airKick", "airKick"], lunge: 0.4 };
 const PT = {
   eyeGuard: { x: 12, y: -97 }, eyeIdle: { x: 10, y: -114 },
   fistGuard: { x: 34, y: -64 }, fistPunch: { x: 56, y: -72 },
@@ -148,6 +153,14 @@ const FW = 224, FH = 144, OX = 112, OY = 140;
 const ATLAS = new Image();
 ATLAS.src = "__ATLAS__";
 const ROW = { idle: 0, move: 1, punch: 2 };
+// Animações de luta (tools/extract_kane_fight.py). Linhas >= 10 nos frames do Kane referem-se a este atlas.
+const KFA = new Image();
+KFA.src = "__KANEFIGHT__";
+const KF_INDEX = {"intro0": [0, 0], "intro1": [0, 1], "intro2": [0, 2], "intro3": [0, 3], "walk0": [1, 0], "walk1": [1, 1], "walk2": [1, 2], "walk3": [1, 3], "walk4": [1, 4], "crouch0": [2, 0], "crouch1": [2, 1], "crouch2": [2, 2], "jumpPrep": [2, 3], "jumpAir": [2, 4], "jumpLand": [2, 5], "win0": [3, 0], "win1": [3, 1], "win2": [3, 2], "blockHigh": [3, 3], "crouchBlock": [3, 4], "crouchHit": [3, 5], "jab0": [4, 0], "jab1": [4, 1], "heavy0": [4, 2], "heavy1": [4, 3], "lowJab0": [4, 4], "lowJab1": [4, 5], "sweep0": [4, 6], "sweep1": [4, 7], "air0": [5, 0], "air1": [5, 1], "airKick": [5, 2], "special0": [5, 3], "special1": [5, 4]};
+const KF_TOP = {"intro0": -129, "intro1": -129, "intro2": -126, "intro3": -128, "walk0": -109, "walk1": -109, "walk2": -109, "walk3": -109, "walk4": -109, "crouch0": -107, "crouch1": -91, "crouch2": -96, "jumpPrep": -103, "jumpAir": -101, "jumpLand": -91, "win0": -130, "win1": -130, "win2": -130, "blockHigh": -140, "crouchBlock": -105, "crouchHit": -98, "jab0": -107, "jab1": -107, "heavy0": -107, "heavy1": -107, "lowJab0": -98, "lowJab1": -99, "sweep0": -100, "sweep1": -93, "air0": -116, "air1": -113, "airKick": -87, "special0": -115, "special1": -117};
+const F = name => [KF_INDEX[name][0] + 10, KF_INDEX[name][1]];
+const kSrc = row => row >= 10 ? KFA : ATLAS;
+const kTint = (hex, row) => tinted(hex, kSrc(row));
 // Soldado de Choque (tools/extract_trooper_sprites.py): linha 0 [parado, ajoelhado a apontar], 1 corrida (4), 2 derrota (5)
 const TROOPER = new Image();
 TROOPER.src = "__TROOPER__";
@@ -155,7 +168,7 @@ const TR = { muzzleAim: { x: 56, y: -44 }, visorStand: { x: 3, y: -115 }, visorA
 const tintCache = {};
 // Versão do atlas pintada de uma cor (para aura de contorno, fantasmas, clarões de dano).
 function tinted(hex, img = ATLAS) {
-  const key = hex + (img === ATLAS ? "" : "T");
+  const key = hex + (img === ATLAS ? "" : img === TROOPER ? "T" : "F");
   if (tintCache[key]) return tintCache[key];
   const c = makeCanvas(img.width, img.height), g = c.getContext("2d");
   g.drawImage(img, 0, 0);
@@ -864,7 +877,7 @@ function distToBeam(px, py, bm) {
   return Math.hypot(px - (bm.ox + bm.dx * t), py - (bm.oy + bm.dy * t));
 }
 function updateBolts(dt) {
-  const fist = k.action === "punch" && k.t >= k.pt.w * 0.4 && k.t < k.pt.w + k.pt.a + 0.06 ? local({ x: PT.fistPunch.x, y: PT.fistPunch.y }) : null;
+  const fist = k.action === "punch" && k.t >= k.pt.w * 0.4 && k.t < k.pt.w + k.pt.a + 0.06 ? local({ x: k.pt.fx.x, y: k.pt.fx.y }) : null;
   for (let i = bolts.length - 1; i >= 0; i--) {
     const b = bolts[i];
     b.life -= dt; b.x += b.vx * dt; b.y += b.vy * dt;
@@ -883,7 +896,7 @@ function updateBolts(dt) {
       }
       // laser nível 2+ desfaz projéteis no caminho
       if (k.beam && k.laserLevel >= 2 && distToBeam(b.x, b.y, k.beam) < 10 * beamWidth(k.laserPow)) { boltExplode(b); gone = true; }
-      else if (!k.dead && k.invuln <= 0 && overlap({ x: b.x - 6, y: b.y - 6, w: 12, h: 12 }, bodyRect(k, C.bodyW + 6, k.kneel > 0.5 ? 70 : C.bodyH))) {
+      else if (!k.dead && k.invuln <= 0 && overlap({ x: b.x - 6, y: b.y - 6, w: 12, h: 12 }, bodyRect(k, C.bodyW + 6, k.kneel > 0.5 || k.crouch ? 72 : C.bodyH))) {
         boltExplode(b); hurtKane(b.dmg, Math.sign(b.vx)); gone = true;
       }
     }
@@ -991,7 +1004,7 @@ function drawTrooper(e) {
 
 // ---------------------------------------------------------------- Kane: pontos no mundo
 // ponto do sprite → mundo, com a mesma rotação do corpo usada no desenho
-function pivotFor(pose) { return pose === "fly" ? PT.pivotFly : pose === "run" || pose === "ground" || pose === "walk" || pose === "stance" ? { x: 0, y: 0 } : PT.pivotBody; }
+function pivotFor(pose) { return pose === "fly" ? PT.pivotFly : pose === "run" || pose === "ground" || pose === "walk" || pose === "stance" || pose === "crouch" || pose === "land" || pose === "intro" || pose === "win" ? { x: 0, y: 0 } : PT.pivotBody; }
 function local(p) {
   const pv = pivotFor(kaneFrame()[2]), c = Math.cos(k.rot), sn = Math.sin(k.rot);
   const dx = p.x - pv.x, dy = p.y - pv.y;
@@ -1066,7 +1079,11 @@ function updateKane(dt) {
     const f = foe.x >= k.x ? 1 : -1;
     if (f !== k.facing) { k.facing = f; k.turnT = 0.09; }
   }
-  if (k.onFloor) k.airDash = false;
+  if (k.onFloor) { k.airDash = false; k.airAttack = false; }
+  // agachar: baixo no chão (sem andar); a guarda baixa defende e os socos passam a ser baixos
+  k.crouch = k.onFloor && !locked && inp.y > 0.55 && (k.action === "none" || k.action === "charge" || (k.action === "punch" && k.pt.low !== undefined) || k.action === "punch" && (k.pt === PUNCH_LOW || k.pt === PUNCH_SWEEP));
+  k.crouchT = clamp((k.crouchT || 0) + (k.crouch ? dt : -dt) / 0.12, 0, 1);
+  k.jumpT = Math.max(0, (k.jumpT || 0) - dt); k.landT = Math.max(0, (k.landT || 0) - dt);
   k.jumpBuf = Math.max(k.jumpBuf - dt, 0);
   k.invuln = Math.max(k.invuln - dt, 0);
   k.coyote = k.onFloor ? C.coyote : Math.max(k.coyote - dt, 0);
@@ -1078,7 +1095,7 @@ function updateKane(dt) {
       start("laser"); k.laserTick = 0; k.lastBeam = null; k.laserSound = false; k.maxTime = 0;
       k.laserLevel = powerLevel(k.laserPow);   // potência que ainda resta continua a contar
       SFX.play("laserStart");
-    } else if (!locked && want("punch")) startPunch(false);
+    } else if (!locked && (k.onFloor || !k.airAttack) && want("punch")) startPunch(false);
   } else if (k.action === "charge") {
     chargeFx(dt);
     if (!held.punch || locked) { k.chargedPing = false; SFX.loopStop("charge", 0.06); if (!locked) startPunch(k.t >= C.chargeTime); else start("none"); }
@@ -1114,7 +1131,7 @@ function updateKane(dt) {
   } else {
     const back = inp.x * k.facing < -0.2;
     k.blocking = back && k.onFloor && k.action === "none" && !locked;           // segurar para trás = defender
-    const tx = inp.x * C.runSpeed * mult * (back ? C.backMult : 1);
+    const tx = k.crouch ? 0 : inp.x * C.runSpeed * mult * (back ? C.backMult : 1);
     const acc = k.onFloor ? (tx === 0 ? C.groundFriction : C.groundAccel) : C.airAccel;
     if (k.dashT > 0) {                                                          // dash: velocidade fixa, quase sem gravidade
       k.dashT -= dt; k.vx = k.dashDir * C.dashSpeed * (0.4 + 0.6 * k.dashT / C.dashTime); k.vy = Math.min(k.vy, 60);
@@ -1124,7 +1141,7 @@ function updateKane(dt) {
     const canJump = k.action !== "punch" && k.action !== "laser" && !locked;
     if (k.jumpBuf > 0 && canJump && k.coyote > 0) {
       // salto com direção (para a frente/para trás) como nos jogos de luta
-      k.vy = C.jumpVel; k.jumpBuf = 0; k.coyote = 0; jumped = true;
+      k.vy = C.jumpVel; k.jumpBuf = 0; k.coyote = 0; jumped = true; k.jumpT = 0.08;
       if (Math.abs(inp.x) > 0.3) k.vx = Math.sign(inp.x) * C.runSpeed * 1.05;
     }
     if (released("jump") && k.vy < 0) k.vy *= C.jumpCut;
@@ -1149,8 +1166,12 @@ function updateKane(dt) {
   }
 }
 function startPunch(energy) {
-  k.energy = energy; k.pt = energy ? PUNCH_HEAVY : PUNCH_JAB; k.hitIds.clear(); start("punch");
-  k.vx += k.facing * C.punchLunge * (energy ? 1.5 : 0.6);
+  // agachado: soco baixo (ou rasteira se carregado); no ar: pontapé aéreo
+  k.energy = energy && k.onFloor && !k.crouch;
+  k.pt = !k.onFloor ? PUNCH_AIR : k.crouch ? (energy ? PUNCH_SWEEP : PUNCH_LOW) : energy ? PUNCH_HEAVY : PUNCH_JAB;
+  if (!k.onFloor) k.airAttack = true;
+  k.hitIds.clear(); start("punch");
+  if (k.onFloor) k.vx += k.facing * C.punchLunge * k.pt.lunge;
   SFX.play("whoosh", energy);
 }
 function startDash(inp) {
@@ -1245,29 +1266,33 @@ function updateAnimState() {
 }
 // [linha, coluna, pose]
 function kaneFrame() {
+  const fr = (name, pose) => [...F(name), pose];
   if (k.kneel > 0.01) return [ROW.punch, 0, "kneel"];
-  if (k.stun > 0 && !k.dead) return k.blocking ? [ROW.punch, 0, "block"] : [ROW.punch, 2, "hurt"];   // recuo = reação ao golpe
-  if (k.blocking) return [ROW.punch, 0, "block"];
-  // laser no ar: pose de pairar (a guarda é uma postura de pés no chão)
-  if (k.action === "laser" && (k.flying || !k.onFloor)) return [ROW.idle, 0, "airLaser"];
-  if (k.action === "laser" || k.action === "charge") return [ROW.punch, 0, "attack"];
+  if (fight.phase === "intro") return fr("intro" + Math.min(3, Math.floor(fight.t / 0.38)), "intro");      // entrada da ronda
+  if ((fight.phase === "ko" || fight.phase === "end") && fight.winner === "kane" && !k.dead && fight.t > 1.1) {
+    const v = fight.t - 1.1; return fr(v < 0.5 ? "win0" : v < 0.8 ? "win1" : "win2", "win");                 // vitória
+  }
+  if (k.stun > 0 && !k.dead) {
+    if (k.blocking) return fr(k.crouch ? "crouchBlock" : "blockHigh", "block");
+    return k.crouch ? fr("crouchHit", "hurt") : [ROW.punch, 2, "hurt"];
+  }
+  if (k.blocking) return fr(k.crouch ? "crouchBlock" : "blockHigh", "block");
+  if (k.action === "laser") return (k.flying || !k.onFloor) ? [ROW.idle, 0, "airLaser"] : [ROW.punch, 0, "attack"];
+  if (k.action === "charge") return fr(k.crouch ? "lowJab0" : "special0", "attack");
   if (k.action === "punch") {
-    const t = k.t, w = k.pt.w, a = k.pt.a, r = k.pt.r;
-    if (t < w) return [ROW.punch, 0, "attack"];
-    if (t < w + a + r * 0.4) return [ROW.punch, 1, "attack"];
-    if (t < w + a + r * 0.75) return [ROW.punch, 2, "attack"];
-    return [ROW.punch, 3, "attack"];
+    const t = k.t, P = k.pt;
+    const i = t < P.w ? 0 : t < P.w + P.a ? 1 : 2;
+    return fr(P.frames[i], "attack");
   }
-  if (k.flying) {
-    // voo: frames 1-2-3-2 (pernas estendidas, só a capa ondula). Nada de ciclo de pernas = não "anda" no ar.
-    if (k.flyPose) return [ROW.move, [1, 2, 3, 2][Math.floor(k.anim * 8) % 4], "fly"];
-    // pairar: só os dois frames com as pernas juntas, devagar
-    return [ROW.idle, Math.floor(k.anim * 3) % 2, "hover"];
+  if (!k.onFloor) return fr(k.jumpT > 0 ? "jumpPrep" : "jumpAir", "air");
+  if (k.landT > 0) return fr("jumpLand", "land");
+  if (k.crouchT > 0) return fr(k.crouchT < 0.34 ? "crouch0" : k.crouchT < 0.67 ? "crouch1" : "crouch2", "crouch");
+  if (k.moveAnim) {
+    // passada de 5 frames, pela distância percorrida; a recuar, a animação corre ao contrário
+    const n = Math.floor(k.walkPh / (Math.PI * 2) * 5) % 5, back = k.vx * k.facing < 0;
+    return fr("walk" + (back ? 4 - n : n), "walk");
   }
-  if (!k.onFloor) return [ROW.idle, k.vy < 0 ? 2 : 3, "air"];
-  // em luta: sempre em guarda; a andar, a guarda baloiça com os passos (kaneTransform)
-  if (k.moveAnim) return [ROW.punch, 0, "walk"];
-  return [ROW.punch, 0, "stance"];
+  return fr("walk2", "stance");
 }
 
 // ---------------------------------------------------------------- VFX: movimento
@@ -1313,7 +1338,7 @@ function movementFx(dt, wasFloor, fallSpeed, jumped) {
   spring(k, "land", 0, 160, 10, dt);
   if (k.jig) k.jig.t += dt;
   if (jumped) k.landV = (k.landV || 0) - 30;
-  if (k.onFloor && !wasFloor) k.landV = (k.landV || 0) + Math.min(fallSpeed, 900) * 0.07;
+  if (k.onFloor && !wasFloor) { k.landV = (k.landV || 0) + Math.min(fallSpeed, 900) * 0.07; if (fallSpeed > 150) k.landT = 0.12; if (k.action === "punch" && k.pt === PUNCH_AIR) start("none"); }
   // fase da passada avança com a distância percorrida (não com o tempo): pés não "patinam"
   const lastPh = k.walkPh; k.walkPh += Math.abs(k.vx) * dt * 0.05;
   if (pose === "walk" || pose === "run") {   // pó e som em cada passo (meia volta da fase)
@@ -1393,7 +1418,7 @@ function chargeFx(dt) {
 function punchImpactFx() {
   const E = k.energy, s = E ? 1.5 : 1;
   SFX.play("impact", E);
-  const f = local({ x: PT.fistPunch.x + 8, y: PT.fistPunch.y });
+  const f = local({ x: k.pt.fx.x + 8, y: k.pt.fx.y });
   const dir = k.facing > 0 ? 0 : Math.PI;
   ring({ x: f.x, y: f.y, r0: 8, r1: 54 * s, arc: Math.PI * 0.95, facing: k.facing, hex: PAL.cyan, width: 8 * s, dur: 0.24 });
   ring({ x: f.x, y: f.y, r0: 4, r1: 30 * s, hex: PAL.white, width: 4, dur: 0.14 });
@@ -1416,21 +1441,21 @@ function punchImpactFx() {
   for (let i = 0; i < 6; i++) emit("windLine", k.x + rand(-30, 10) * k.facing, k.y - rand(60, 85), k.facing * 900, 0, 0.1, 1.5, 1.5, "back");
 }
 function punchQuery() {
-  const s = k.energy ? C.energySizeMult : 1;
-  const w = C.punchSize.w * s, h = C.punchSize.h * s;
-  const cx = k.x + C.punchOff.x * s * k.facing, cy = k.y + C.punchOff.y;
+  const s = k.energy ? C.energySizeMult : 1, B = k.pt.box;
+  const w = B.w * s, h = B.h * s;
+  const cx = k.x + B.x * s * k.facing, cy = k.y + B.y;
   const box = { x: cx - w / 2, y: cy - h / 2, w, h };
-  const dmg = C.punchDmg * (k.energy ? C.energyDmgMult : 1), kb = C.punchKnock * (k.energy ? C.energyKnockMult : 1);
+  const dmg = k.pt.dmg * (k.energy ? C.energyDmgMult : 1), kb = C.punchKnock * (k.energy ? C.energyKnockMult : 1) * (k.pt.stagger ? 1.4 : 1);
   enemies.forEach((e, i) => {
     if (!enemyAlive(e) || k.hitIds.has(i) || !overlap(box, bodyRect(e, e.w, e.h))) return;
     k.hitIds.add(i);
     const n = Math.hypot(1, 0.35);
-    hitEnemy(e, dmg, k.facing / n * kb, -0.35 / n * kb);
+    hitEnemy(e, dmg, k.facing / n * kb, -0.35 / n * kb, k.energy || !!k.pt.stagger);
     setFury(k.fury + C.furyOnHit);
     hitstop = k.energy ? 0.14 : 0.07;
     SFX.play("hit", k.energy);
     k.whiteFlash = 0.06;
-    const hx = e.x - k.facing * e.w / 2, hy = k.y + PT.fistPunch.y;
+    const hx = e.x - k.facing * e.w / 2, hy = k.y + k.pt.fx.y;
     ring({ x: hx, y: hy, r0: 4, r1: k.energy ? 70 : 40, hex: PAL.white, width: 5, dur: 0.2 });
     spray("sparkHot", hx, hy, k.energy ? 40 : 18, { speed: k.energy ? 650 : 420, dir: k.facing > 0 ? 0 : Math.PI, spread: 2.4, life: 0.4, size: 2.2 });
     light(hx, hy, k.energy ? 260 : 160, PAL.gold, 1.2);
@@ -1573,7 +1598,7 @@ function kaneTransform(pose) {
   }
   if (k.dead) ctx.rotate(-1.3);
 }
-function drawSprite(img, row, col, x = -OX, y = -OY) { ctx.drawImage(img, col * FW, row * FH, FW, FH, x, y, FW, FH); }
+function drawSprite(img, row, col, x = -OX, y = -OY) { ctx.drawImage(img, col * FW, (row % 10) * FH, FW, FH, x, y, FW, FH); }
 // Pose de joelhos gerada a partir da guarda: pernas comprimidas a partir dos pés (joelho dobrado)
 // e tronco a descer, cabeça baixa e a arfar. Transição contínua com k.kneel (0 → 1).
 
@@ -1600,7 +1625,7 @@ function cellMask(img, id, row, col) {
   return m;
 }
 function drawWarped(img, maskImg, id, row, col, field, ox = 0, oy = 0) {
-  const cells = cellMask(maskImg, id, row, col), sx0 = col * FW, sy0 = row * FH;
+  const cells = cellMask(maskImg, id, row % 10, col), sx0 = col * FW, sy0 = (row % 10) * FH;
   for (let i = 0; i < cells.length; i += 2) {
     const cx = cells[i], cy = cells[i + 1], cw = Math.min(CELL, FW - cx), ch = Math.min(CELL, FH - cy);
     const d = field(cx - OX + cw / 2, cy - OY + ch / 2);
@@ -1671,7 +1696,7 @@ function trooperField(e) {
 }
 let curKaneField = null;
 function drawPose(img, row, col, pose, ox = 0, oy = 0) {
-  if (pose !== "kneel") return drawWarped(img, ATLAS, "K", row, col, curKaneField || kaneField(pose), ox, oy);
+  if (pose !== "kneel") return drawWarped(img, kSrc(row), row >= 10 ? "KF" : "K", row, col, curKaneField || kaneField(pose), ox, oy);
   const kp = easeInOut(k.kneel), HIP = -54, comp = 1 - 0.52 * kp, drop = -HIP * 0.52 * kp;
   const pant = Math.sin(time * 8.4) * 1.6 * kp;
   ctx.save(); ctx.scale(1 + 0.14 * kp, comp);
@@ -1686,8 +1711,7 @@ function drawPose(img, row, col, pose, ox = 0, oy = 0) {
 }
 
 function drawGhosts() {
-  if (!ATLAS.naturalWidth) return;
-  const tex = tinted(PAL.cyan);
+  if (!ATLAS.naturalWidth || !KFA.naturalWidth) return;
   ADD();
   for (let i = ghosts.length - 1; i >= 0; i--) {
     const g = ghosts[i];
@@ -1695,7 +1719,7 @@ function drawGhosts() {
     ctx.translate(g.x, g.y); ctx.scale(g.facing, 1);
     if (g.rot) { ctx.translate(g.pv.x, g.pv.y); ctx.rotate(g.rot); ctx.translate(-g.pv.x, -g.pv.y); }
     if (g.trooper) { if (TROOPER.naturalWidth) ctx.drawImage(tinted(PAL.ember, TROOPER), g.col * FW, g.row * FH, FW, FH, -OX, -OY, FW, FH); }
-    else drawSprite(tex, g.row, g.col);
+    else drawSprite(kTint(PAL.cyan, g.row), g.row, g.col);
     ctx.restore();
   }
   NORMAL();
@@ -1724,7 +1748,7 @@ function drawKaneBack(row, col, pose) {
   // aura de contorno na carga do soco (silhueta pintada, desfocada por desvios)
   if (k.action === "charge" && ATLAS.naturalWidth) {
     const grow = Math.min(k.t / C.chargeTime, 1), charged = grow >= 1 && k.fury >= C.energyCost;
-    const tex = tinted(charged ? PAL.cyan : PAL.red), a = (0.18 + grow * 0.3) * (0.8 + 0.2 * Math.sin(time * 30));
+    const tex = kTint(charged ? PAL.cyan : PAL.red, row), a = (0.18 + grow * 0.3) * (0.8 + 0.2 * Math.sin(time * 30));
     ctx.globalAlpha = a;
     for (const [dx, dy] of [[-3, 0], [3, 0], [0, -3], [0, 3], [-2, -2], [2, -2]]) drawSprite(tex, row, col, -OX + dx, -OY + dy);
     glow(PT.fistGuard.x, PT.fistGuard.y, 30 + grow * 40, charged ? PAL.cyan : PAL.red, 0.5 + grow * 0.4);
@@ -1732,7 +1756,7 @@ function drawKaneBack(row, col, pose) {
   // aura de poder do laser: cresce com o nível (contorno + brilho atrás do corpo)
   if (k.action === "laser" && k.beam && ATLAS.naturalWidth && k.laserLevel >= 2) {
     const LV = C.laserLevels[k.laserLevel - 1], lv = k.laserLevel - 1;
-    const tex = tinted(LV.mid), flick = 0.8 + 0.2 * Math.sin(time * 37);
+    const tex = kTint(LV.mid, row), flick = 0.8 + 0.2 * Math.sin(time * 37);
     ctx.globalAlpha = (0.1 + lv * 0.09) * flick;
     const d = 2 + lv * 2;
     for (const [dx, dy] of [[-d, 0], [d, 0], [0, -d], [0, d], [-d, -d], [d, -d]]) drawSprite(tex, row, col, -OX + dx, -OY + dy);
@@ -1748,12 +1772,12 @@ function drawKaneSprite(row, col, pose) {
   ctx.save(); kaneTransform(pose);
   const blink = k.invuln > 0 && Math.floor(k.invuln * 20) % 2;
   ctx.globalAlpha = blink ? 0.45 : 1;
-  drawPose(ATLAS, row, col, pose);
+  drawPose(kSrc(row), row, col, pose);
   // clarões de cor por cima do sprite (dano = vermelho, impacto = branco, laser forte = brilho quente)
   ADD();
-  if (k.hurtFlash > 0) { ctx.globalAlpha = k.hurtFlash / 0.25 * 0.45; drawPose(tinted(PAL.red), row, col, pose); }
-  if (k.whiteFlash > 0) { ctx.globalAlpha = 0.9; drawPose(tinted("#ffffff"), row, col, pose); }
-  if (k.action === "laser" && k.beam && k.laserLevel >= 2) { ctx.globalAlpha = 0.05 * (k.laserLevel - 1) * (0.7 + 0.3 * Math.sin(time * 29)); drawPose(tinted(C.laserLevels[k.laserLevel - 1].mid), row, col, pose); }
+  if (k.hurtFlash > 0) { ctx.globalAlpha = k.hurtFlash / 0.25 * 0.45; drawPose(kTint(PAL.red, row), row, col, pose); }
+  if (k.whiteFlash > 0) { ctx.globalAlpha = 0.9; drawPose(kTint("#ffffff", row), row, col, pose); }
+  if (k.action === "laser" && k.beam && k.laserLevel >= 2) { ctx.globalAlpha = 0.05 * (k.laserLevel - 1) * (0.7 + 0.3 * Math.sin(time * 29)); drawPose(kTint(C.laserLevels[k.laserLevel - 1].mid, row), row, col, pose); }
   ctx.restore(); NORMAL(); curKaneField = null;
 }
 function drawKaneFront(row, col, pose) {
@@ -1765,14 +1789,15 @@ function drawKaneFront(row, col, pose) {
     glow(e.x, e.y, 14, PAL.red, fl); glowStretch(e.x, e.y, 22, 3, PAL.pink, fl * 0.6);
     NORMAL(); return;
   }
-  const eye = row === ROW.punch ? PT.eyeGuard : PT.eyeIdle;
+  let eye = row === ROW.punch ? PT.eyeGuard : PT.eyeIdle;
+  if (row >= 10) { const nm = Object.keys(KF_INDEX).find(n => KF_INDEX[n][0] === row - 10 && KF_INDEX[n][1] === col); eye = { x: 9, y: (KF_TOP[nm] ?? -129) + 16 }; }
   // visor sempre aceso (pulsa devagar), muito mais forte no laser; com pouca energia, falha
   const pulse = 0.75 + 0.25 * Math.sin(time * 3);
   let vis = 0.35 * pulse * (k.weak && Math.random() < 0.2 ? 0.2 : 1);
   if (k.action === "laser") vis = k.beam ? 1.3 + 0.4 * (k.laserLevel - 1) : 0.5 + k.t / C.laserWindup;
   glow(eye.x, eye.y, 10 + vis * 16, PAL.red, vis);
   glowStretch(eye.x, eye.y, 26 + vis * 30, 4, PAL.pink, vis * 0.8);
-  if (row === ROW.idle && !k.dead) {                    // mãos: aura vermelha atrás, energia ciano no punho
+  if (row === ROW.idle && !k.dead && false) {
     glow(PT.handBack.x, PT.handBack.y, 16, PAL.red, 0.35 + 0.15 * Math.sin(time * 5));
     glow(PT.fistIdle.x, PT.fistIdle.y, 12, PAL.cyan, 0.3 + 0.15 * Math.sin(time * 7 + 1));
   }
@@ -1792,7 +1817,7 @@ function drawKaneFront(row, col, pose) {
         ctx.globalAlpha = al * a; ctx.strokeStyle = col; ctx.lineWidth = lw * (E ? 1.4 : 1);
         ctx.beginPath(); ctx.arc(10, -40, 52, -Math.PI * 0.62, -Math.PI * 0.62 + Math.PI * 0.5 * easeOut(Math.min(1, t * 3))); ctx.stroke();
       }
-      const fx = PT.fistPunch.x + 6, fy = PT.fistPunch.y, s = E ? 1.6 : 1;
+      const fx = k.pt.fx.x + 6, fy = k.pt.fx.y, s = E ? 1.6 : 1;
       glow(fx, fy, (40 + 30 * t) * s, PAL.cyan, 0.9 * a);
       glow(fx, fy, (16 + 10 * t) * s, PAL.white, a, true);
       glowStretch(fx + 10, fy, 110 * s * (0.6 + t), 6 * s, PAL.cyanSoft, 0.8 * a);   // clarão horizontal
@@ -2014,7 +2039,7 @@ function render(rdt = 1 / 60) {
   drawDecals();
   drawParticles("back");
   enemies.forEach(drawEnemy);
-  const ready = ATLAS.complete && ATLAS.naturalWidth;
+  const ready = ATLAS.complete && ATLAS.naturalWidth && KFA.complete && KFA.naturalWidth;
   let fr = null;
   if (ready) {
     fr = kaneFrame();

@@ -57,3 +57,10 @@ Kane contra o Soldado de Choque, de lado, como nos jogos de luta: melhor de 3 ro
 - **Kane:** fica sempre virado para o adversário; segurar para trás defende (dano reduzido a 15%); salto com direção; DASH (no chão e uma vez no ar); socos encadeiam em combo; soco de energia e laser por níveis atordoam.
 - **Soldado:** mantém distância, dispara o canhão com aviso de mira (3 projéteis) ou faz uma investida de ombro com aviso (aguenta golpes leves). Pode ser devolvido o projétil com o soco.
 - Câmara enquadra os dois lutadores e aproxima quando estão perto.
+
+### Animações de luta (sheets "Postura de combate")
+`tools/extract_kane_fight.py` gera `web/kane_fight_atlas.png` a partir de `assets/kane/source/kane_fight_sheet1/2.jpg`
+(escala pela altura em pé e pela distância topo→visor; FX pintados removidos). Usadas em: entrada da ronda, guarda, passada
+(5 frames, ao contrário a recuar), agachar (transição), salto (preparação, ar, aterragem), defesa alta e baixa, jab,
+soco de energia (pose do especial), soco agachado, rasteira (agachado + segurar soco, derruba), pontapé aéreo (soco no ar)
+e vitória. Laser, reação ao golpe e joelhos continuam com os sprites anteriores.
