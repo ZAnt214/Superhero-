@@ -60,12 +60,13 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
 .btn small { display: block; font-size: 8px; color: var(--muted); margin-top: 3px; }
 
 #help {
-  position: fixed; top: calc(10px + env(safe-area-inset-top, 0px));
-  right: max(16px, env(safe-area-inset-right, 0px));
-  font-size: 10px; color: var(--muted); text-align: right; line-height: 1.6; max-width: 46ch;
+  position: fixed; bottom: calc(48px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%);
+  width: min(46ch, 46vw); font-size: 9px; color: var(--muted); text-align: center; line-height: 1.6;
+  transition: opacity 1s; pointer-events: none;
 }
+#help.gone { opacity: 0; }
 #snd {
-  position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%);
   font: 10px/1 var(--pixel); color: var(--ink); background: color-mix(in srgb, var(--panel) 80%, transparent);
   border: 1px solid color-mix(in srgb, var(--ink) 30%, transparent); border-radius: 8px; padding: 8px 12px;
 }
@@ -79,14 +80,14 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
 </style>
 
 <div id="stage"><canvas id="c"></canvas></div>
-<div id="help">Toque: analógico à esquerda · Teclado: WASD, Espaço, Shift, J, K<br>Comando: stick, A salto, X soco, Y/RT laser, LB voo</div>
+<div id="help" onanimationend="">Analógico: andar · para trás = defender · SALTO · DASH · SOCO (manter = energia) · LASER (manter = mais forte)<br>Teclado: A/D andar, Espaço salto, Shift dash, J laser, K soco</div>
 <div id="rotate">Roda o iPhone para a horizontal</div>
 <button id="snd" type="button">SOM: ON</button>
 
 <div id="safe-probe" style="position:fixed;visibility:hidden;pointer-events:none;padding-left:env(safe-area-inset-left,0px)"></div>
 <div id="stick" aria-label="Analógico de movimento"><div id="stick-base"><div id="stick-knob"></div></div></div>
 <div class="pad right">
-  <button class="btn fly" data-k="fly">VOO</button>
+  <button class="btn fly" data-k="fly">DASH</button>
   <button class="btn laser" data-k="laser">LASER<small>manter</small></button>
   <button class="btn jump" data-k="jump">SALTO</button>
   <button class="btn punch" data-k="punch">SOCO<small>manter = energia</small></button>

@@ -10,15 +10,15 @@
 
 // ---------------------------------------------------------------- configuração
 const C = {
-  maxHp: 100, maxFury: 100, furyRegen: 8, invuln: 0.6,
+  maxHp: 300, maxFury: 100, furyRegen: 8, invuln: 0.6,
   runSpeed: 220, groundAccel: 1800, groundFriction: 2400, airAccel: 1100,
   gravity: 1400, fallMult: 1.5, maxFall: 900, jumpVel: -480, jumpCut: 0.45,
   coyote: 0.1, jumpBuffer: 0.12,
   flightSpeed: 320, flightAccel: 1600,
-  laserRange: 640, laserWindup: 0.16, laserDps: 45, laserTick: 0.1,
+  laserRange: 900, laserWindup: 0.16, laserDps: 30, laserTick: 0.1,
   laserFuryPerSec: 30, laserMinFury: 10, laserMoveMult: 0.35, laserKnock: 60,
   punchDmg: 18, punchKnock: 320, punchWindup: 0.08, punchActive: 0.1, punchRecovery: 0.2,
-  punchLunge: 180, punchSize: { w: 44, h: 52 }, punchOff: { x: 28, y: -72 }, furyOnHit: 6,
+  punchLunge: 180, punchSize: { w: 64, h: 56 }, punchOff: { x: 42, y: -72 }, furyOnHit: 6,
   chargeTime: 0.4, energyCost: 25, energyDmgMult: 2.5, energyKnockMult: 2.2, energySizeMult: 1.6,
   bodyW: 28, bodyH: 108,
   // laser em níveis: quanto mais tempo seguras, mais forte (e mais gasta)
@@ -32,6 +32,8 @@ const C = {
   powerFull: 2.9, powerDecay: 1.6,
   // Disparar no máximo cansa o corpo: ao largar, ajoelha-se para recuperar (mais tempo no máximo = mais tempo de joelhos).
   overloadMin: 0.6, kneelBase: 0.9, kneelPerSec: 0.35, kneelMax: 2.4,
+  // luta: andar para trás é mais lento e defende; dash no lugar do voo
+  backMult: 0.65, blockChip: 0.15, dashSpeed: 720, dashTime: 0.18, dashCd: 0.45, roundTime: 99,
 };
 // Pontos medidos nos frames (assets/kane/kane_points.json), relativos aos pés, a olhar para a direita.
 const PT = {
@@ -167,18 +169,62 @@ function spawnTrooper(x) {
   enemies.push({ type: "trooper", x, y: surfaceY(x), homeY: surfaceY(x), vx: 0, vy: 0, w: 44, h: 124, hp: 280, maxHp: 280, flash: 0, dead: 0, squash: 0, home: x,
     facing: -1, state: "patrol", st: 0, cd: 1.2, shots: 0, recoil: 0, anim: Math.random() * 3, pdir: -1, deathT: 0, stepT: 0, smokeT: 0, onFloor: true });
 }
-[700, 2560, 4060].forEach(spawnEnemy);              // bonecos: rua, telhado A, zona industrial
-[1210, 1960, 3060, 4450, 5000].forEach(spawnTrooper); // soldados: praça, viaduto, telhado B, terra queimada
+spawnTrooper(1150);                                   // o adversário: Soldado de Choque
+const foe = enemies[0];
+foe.maxHp = foe.hp = 600; foe.state = "neutral"; foe.stun = 0;
 
 const k = {
-  x: 200, y: FLOOR_Y, vx: 0, vy: 0, facing: 1, hp: C.maxHp, fury: C.maxFury,
+  x: 650, y: FLOOR_Y, vx: 0, vy: 0, facing: 1, hp: C.maxHp, fury: C.maxFury,
   flying: false, onFloor: false, action: "none", t: 0, coyote: 0, jumpBuf: 0, invuln: 0,
   laserTick: 0, energy: false, hitIds: new Set(), beam: null, beamFade: 0, lastBeam: null, aim: null,
   anim: 0, dead: false, moveAnim: false, squash: 0, stretch: 0, turnT: 0, rot: 0, flyPose: false, laserSound: false,
-  laserPow: 0, laserLevel: 1, maxTime: 0, exhausted: false, exhaustT: 0, kneel: 0, kneelLanded: false, pantT: 0, weak: false,
+  laserPow: 0, laserLevel: 1, maxTime: 0, stun: 0, blocking: false, dashT: 0, dashDir: 1, dashCd: 0, airDash: false, hpTrail: 300, exhausted: false, exhaustT: 0, kneel: 0, kneelLanded: false, pantT: 0, weak: false,
   hurtFlash: 0, whiteFlash: 0, chargedPing: false, stepT: 0, ghostT: 0, scorchT: 0,
 };
 let floats = [], time = 0, hitstop = 0;
+// ---------------------------------------------------------------- luta: rondas, relógio, combos
+const fight = { phase: "intro", t: 0, round: 1, kWins: 0, fWins: 0, timer: 99, combo: 0, comboT: 0, foeCombo: 0, foeComboT: 0, winner: null, text: "", foeTrail: 600 };
+function resetFighters() {
+  Object.assign(k, { x: 650, y: FLOOR_Y, vx: 0, vy: 0, facing: 1, hp: C.maxHp, hpTrail: C.maxHp, dead: false, invuln: 0, action: "none", t: 0,
+    stun: 0, blocking: false, dashT: 0, dashCd: 0, kneel: 0, exhausted: false, exhaustT: 0, laserPow: 0, laserLevel: 1, maxTime: 0,
+    beam: null, lastBeam: null, beamFade: 0, aim: null, hurtFlash: 0, whiteFlash: 0, rot: 0, squash: 0, stretch: 0 });
+  Object.assign(foe, { x: 1150, y: FLOOR_Y, vx: 0, vy: 0, facing: -1, hp: foe.maxHp, dead: 0, deathT: 0, state: "neutral", st: 0, cd: 1.4, recoil: 0, flash: 0 });
+  fight.foeTrail = foe.maxHp; bolts.length = 0; decals.length = 0; ghosts.length = 0;
+  SFX.loopStop("laser", 0.05); SFX.loopStop("charge", 0.05);
+}
+function startRound(n) {
+  resetFighters();
+  Object.assign(fight, { phase: "intro", t: 0, round: n, timer: C.roundTime, combo: 0, comboT: 0, foeCombo: 0, winner: null, text: "" });
+  SFX.play("round");
+}
+function endRound(reason) {
+  const kp = k.hp / C.maxHp, fp = Math.max(0, foe.hp) / foe.maxHp;
+  fight.winner = reason === "time" ? (kp >= fp ? "kane" : "foe") : (k.dead ? "foe" : "kane");
+  if (fight.winner === "kane") fight.kWins++; else fight.fWins++;
+  fight.phase = "ko"; fight.t = 0; fight.text = reason === "time" ? "TEMPO!" : "K.O.";
+  SFX.play("ko"); flash(0.5); zoomKick(0.06); addTrauma(0.4);
+  SFX.loopStop("laser", 0.1); SFX.loopStop("charge", 0.1);
+}
+function updateFight(dt) {
+  fight.t += dt; fight.comboT -= dt; fight.foeComboT -= dt;
+  // barra "fantasma" do dano recente: espera um pouco e depois desce
+  if (k.stun <= 0) k.hpTrail = Math.max(k.hp, k.hpTrail - 160 * dt);
+  if (foe.state !== "hitstun" && foe.state !== "stagger") fight.foeTrail = Math.max(Math.max(foe.hp, 0), fight.foeTrail - 320 * dt);
+  if (fight.phase === "intro") {
+    if (fight.t >= 1.05 && fight.t - dt < 1.05) SFX.play("fight");
+    if (fight.t >= 1.7) { fight.phase = "fight"; fight.t = 0; }
+  } else if (fight.phase === "fight") {
+    fight.timer = Math.max(0, fight.timer - dt);
+    if (k.dead) endRound("ko"); else if (foe.dead > 0) endRound("ko"); else if (fight.timer <= 0) endRound("time");
+  } else if (fight.phase === "ko") {
+    if (fight.t > 3.6) {
+      if (fight.kWins >= 2 || fight.fWins >= 2) { fight.phase = "end"; fight.t = 0; SFX.play(fight.kWins >= 2 ? "win" : "lose"); }
+      else startRound(fight.round + 1);
+    }
+  } else if (fight.phase === "end") {
+    if (fight.t > 1.5 && ["jump", "punch", "laser", "fly"].some(n => held[n] && !prev[n])) { fight.kWins = fight.fWins = 0; startRound(1); }
+  }
+}
 
 // ---------------------------------------------------------------- câmara (trauma + zoom)
 const cam = { x: 200, y: 690, trauma: 0, zoom: 1, kick: 0, dirX: 0, dirY: 0, seed: Math.random() * 100 };
@@ -284,6 +330,16 @@ const SFX = (() => {
     powerUp() { const t = T(), o = bus(0.3); tone("sawtooth", 60, 300, t, 0.45, 0.1, o, 0.05); tone("sine", 200, 800, t, 0.4, 0.1, o, 0.05); },
     kneelThud() { const t = T(), o = bus(0.25); tone("sine", 120, 38, t, 0.35, 0.7, o); hiss(t, 0.18, 0.35, o, { type: "lowpass", f0: 1200, f1: 200 }); tone("square", 70, 40, t, 0.12, 0.1, o); },
     pant() { const t = T(), o = bus(0.05, 0.6); hiss(t, 0.22, 0.12, o, { f0: 900, f1: 600, q: 1.5, attack: 0.08 }); hiss(t + 0.32, 0.18, 0.08, o, { f0: 700, f1: 500, q: 1.5, attack: 0.06 }); },
+    // --- luta
+    round() { const t = T(), o = bus(0.6); tone("sine", 220, 110, t, 1.2, 0.35, o); tone("triangle", 440, 220, t, 1, 0.12, o); hiss(t, 0.6, 0.15, o, { f0: 500, f1: 3000, q: 1 }); },
+    fight() { const t = T(), o = bus(0.6); tone("sawtooth", 110, 55, t, 0.5, 0.25, o); tone("sine", 90, 30, t, 0.8, 0.8, o); hiss(t, 0.3, 0.6, o, { type: "lowpass", f0: 6000, f1: 400 }); [1, 1.5, 2].forEach((m, i) => tone("triangle", 330 * m, 330 * m, t + i * 0.06, 0.5, 0.1, o)); },
+    ko() { const t = T(), o = bus(0.8); tone("sine", 70, 22, t, 2.2, 1, o); tone("sawtooth", 140, 30, t, 1.4, 0.2, o); hiss(t, 1.8, 0.5, o, { type: "lowpass", f0: 2500, f1: 80 }); },
+    win() { const t = T(), o = bus(0.5); [523, 659, 784, 1046].forEach((f, i) => tone("triangle", f, f, t + i * 0.14, 0.6, 0.14, o)); },
+    lose() { const t = T(), o = bus(0.5); [392, 330, 262, 196].forEach((f, i) => tone("triangle", f, f * 0.98, t + i * 0.2, 0.7, 0.13, o)); },
+    block() { const t = T(), o = bus(0.3); tone("square", 1800, 900, t, 0.08, 0.12, o); tone("triangle", 2600, 2400, t, 0.25, 0.08, o); hiss(t, 0.06, 0.3, o, { type: "highpass", f0: 3000 }); },
+    dash() { const t = T(), o = bus(0.1); hiss(t, 0.2, 0.35, o, { f0: 600, f1: 3000, q: 1.5, attack: 0.01 }); tone("sine", 300, 900, t, 0.15, 0.06, o); },
+    stomp() { const t = T(), o = bus(0.2); tone("sine", 80, 30, t, 0.3, 0.6, o); hiss(t, 0.15, 0.3, o, { type: "lowpass", f0: 700 }); },
+    charge() { const t = T(), o = bus(0.2); hiss(t, 0.6, 0.4, o, { f0: 300, f1: 1400, q: 1, attack: 0.03 }); tone("sawtooth", 60, 90, t, 0.6, 0.12, o, 0.03); },
     // --- Soldado de Choque
     heavyStep(v = 1) { const t = T(), o = bus(0.1, v); tone("sine", 90, 35, t, 0.18, 0.5, o); hiss(t, 0.08, 0.25, o, { type: "lowpass", f0: 500 }); hiss(t + 0.02, 0.05, 0.12, o, { type: "highpass", f0: 3000 }); },
     cannonCharge() { const t = T(), o = bus(0.2); tone("sawtooth", 70, 420, t, 0.75, 0.09, o, 0.05); hiss(t, 0.75, 0.1, o, { f0: 600, f1: 4000, q: 4, attack: 0.1 }); },
@@ -622,11 +678,18 @@ function rayHit(ox, oy, dx, dy, r) {
 // ---------------------------------------------------------------- inimigos
 function hitEnemy(e, dmg, kx, ky, stagger = false) {
   const heavy = e.type === "trooper";
-  e.hp -= dmg; e.vx += kx * (heavy ? 0.35 : 1); e.vy += ky * (heavy ? 0.2 : 1); e.flash = 0.1; e.squash = 0.15;
-  floats.push({ x: e.x + rand(-10, 10), y: e.y - e.h - 10, v: Math.round(dmg), t: 0.8, big: dmg > 30 });
+  if (heavy && (e.dead > 0 || fight.phase !== "fight")) return;
+  // contador de combos: golpes seguidos enquanto o adversário ainda está atordoado
+  const comboOn = fight.comboT > 0 && (e.state === "hitstun" || e.state === "stagger");
+  fight.combo = comboOn ? fight.combo + 1 : 1; fight.comboT = 1.0;
+  const scaled = dmg * Math.max(0.5, 1 - (fight.combo - 1) * 0.08);   // dano decresce em combos longos
+  e.hp -= scaled; e.vx += kx * (heavy ? 0.35 : 1); e.vy += ky * (heavy ? 0.2 : 1); e.flash = 0.1; e.squash = 0.15;
+  floats.push({ x: e.x + rand(-10, 10), y: e.y - e.h - 10, v: Math.round(scaled), t: 0.8, big: scaled > 30 });
   if (heavy) {
-    if (stagger && e.hp > 0 && e.state !== "stagger") { e.state = "stagger"; e.st = 0; SFX.loopStop("cannon" + e.home, 0.05); }
-    if (e.hp <= 0) trooperDie(e);
+    if (e.hp <= 0) { trooperDie(e); return; }
+    const armored = e.state === "charge" && !stagger;               // a investida aguenta golpes leves
+    if (stagger) { e.state = "stagger"; e.st = 0; }
+    else if (!armored && dmg >= 4) { e.state = "hitstun"; e.st = 0; }
     return;
   }
   if (e.hp <= 0) { e.dead = 2.8; e.dissolve = 0.75; addTrauma(0.25); SFX.play("dissolve"); }
@@ -671,59 +734,83 @@ function updateTrooper(e, dt) {
   if (e.dead > 0) { trooperDeathUpdate(e, dt); return; }
   e.st += dt; e.anim += dt; e.cd -= dt;
   const dx = k.x - e.x, adx = Math.abs(dx);
-  const sees = !k.dead && adx < 580 && Math.abs(k.y - e.y) < 280;
+  if (e.onFloor && e.state !== "charge" && e.state !== "fire" && e.state !== "aim") e.facing = Math.sign(dx) || e.facing;
   let target = 0;
+  const active = fight.phase === "fight" && !k.dead;
+  if (!active && e.state !== "hitstun" && e.state !== "stagger") e.state = "neutral";
   switch (e.state) {
-    case "patrol":
-      target = 45 * e.pdir; e.facing = e.pdir;
-      if ((e.x - e.home) * e.pdir > 130) e.pdir = -e.pdir;
-      if (sees) { e.state = "chase"; e.st = 0; }
+    case "neutral":
+      if (!active) break;
+      // mantém distância média: aproxima-se se longe, recua se encostado, oscila no meio
+      if (adx > 460) target = 115 * e.facing;
+      else if (adx < 130) target = -85 * e.facing;
+      else target = Math.sin(time * 1.4) * 45 * e.facing;
+      if (e.cd <= 0 && e.onFloor) {
+        const r = Math.random();
+        if (adx < 330 && r < 0.6) { e.state = "windup"; e.st = 0; SFX.play("stomp"); }
+        else { e.state = "aim"; e.st = 0; SFX.play("cannonCharge"); }
+      }
       break;
-    case "chase":
-      e.facing = Math.sign(dx) || e.facing;
-      target = adx > 320 ? 105 * e.facing : 0;
-      if (adx <= 440 && e.cd <= 0 && e.onFloor) { e.state = "aim"; e.st = 0; SFX.play("cannonCharge"); }
-      if (!sees && e.st > 2) { e.state = "patrol"; e.st = 0; }
-      break;
-    case "aim": {
+    case "aim": {                                             // aviso: mira laranja e carga no cano
       const m = trooperMuzzle(e);
       if (Math.random() < 0.8) orbitIn("sparkHot", () => trooperMuzzle(e), 1, 30, 0.16, 1.6);
       light(m.x, m.y, 60 + e.st * 140, PAL.ember, 0.4 + e.st);
-      if (e.st >= 0.75) { e.state = "fire"; e.st = 0; e.shots = 0; }
+      if (e.st >= 0.6) { e.state = "fire"; e.st = 0; e.shots = 0; }
       break;
     }
     case "fire":
       if (e.shots < 3 && e.st >= e.shots * 0.16) { fireBolt(e); e.shots++; }
-      if (e.st >= 0.7) { e.state = "cool"; e.st = 0; }
+      if (e.st >= 0.6) { e.state = "cool"; e.st = 0; }
       break;
     case "cool":
       if (Math.random() < 0.3) { const m = trooperMuzzle(e); emit("smoke", m.x, m.y, e.facing * 20, -30, 0.9, 4, 14, "front"); }
-      if (e.st >= 0.55) { e.state = "chase"; e.st = 0; e.cd = 1.5 + Math.random() * 0.6; }
+      if (e.st >= 0.45) { e.state = "neutral"; e.st = 0; e.cd = 0.9 + Math.random() * 0.8; }
+      break;
+    case "windup":                                            // aviso da investida: pisa o chão e range a armadura
+      if (Math.random() < 0.5) emit("dust", e.x - e.facing * 10, e.y - 3, rand(-80, 80), rand(-50, -10), 0.4, 6, 14, "back");
+      if (e.st >= 0.38) { e.state = "charge"; e.st = 0; e.chargeDir = e.facing; e.chargeHit = false; SFX.play("charge"); }
+      break;
+    case "charge": {                                          // investida de ombro: atravessa o ecrã
+      target = 600 * e.chargeDir; e.facing = e.chargeDir;
+      if (Math.random() < 0.7) emit("dust", e.x - e.facing * 18, e.y - 3, -e.facing * rand(80, 200), rand(-40, -10), 0.5, 7, 18, "back");
+      if (Math.random() < 0.5) { ghosts.push({ x: e.x, y: e.y, row: 1, col: Math.floor(e.anim * 12) % 4, facing: e.facing, rot: 0, pv: { x: 0, y: 0 }, t: 0.2, trooper: true }); }
+      const hitBox = { x: e.x + e.facing * 10 - 30, y: e.y - 110, w: 60, h: 100 };
+      if (!e.chargeHit && overlap(hitBox, bodyRect(k, C.bodyW, C.bodyH))) {
+        e.chargeHit = true; hurtKane(26, e.facing, true);
+        ring({ x: k.x - e.facing * 10, y: k.y - 60, r0: 8, r1: 60, hex: PAL.gold, width: 6, dur: 0.25 });
+        e.state = "recover"; e.st = 0; e.vx = -e.facing * 120;
+      }
+      const atWall = (e.chargeDir > 0 && e.x > ARENA_R - 40) || (e.chargeDir < 0 && e.x < ARENA_L + 40);
+      if (e.st >= 0.65 || atWall) {
+        if (atWall) { addTrauma(0.3); spray("debris", e.x + e.facing * 20, e.y - 60, 8, { speed: 260, dir: e.facing > 0 ? Math.PI : 0, spread: 1.4, life: 0.8, size: 3 }); SFX.play("boltHit"); }
+        e.state = "recover"; e.st = 0;
+      }
+      break;
+    }
+    case "recover":
+      if (e.st >= 0.55) { e.state = "neutral"; e.st = 0; e.cd = 1.0 + Math.random() * 0.8; }
+      break;
+    case "hitstun":
+      if (e.st >= 0.24) { e.state = "neutral"; e.st = 0; e.cd = Math.max(e.cd, 0.35); }
       break;
     case "stagger":
       if (Math.random() < 0.4) spray("sparkHot", e.x + rand(-14, 14), e.y - rand(40, 110), 1, { speed: 160, life: 0.3, size: 1.5 });
-      if (e.st >= 0.5) { e.state = "chase"; e.st = 0; e.cd = Math.max(e.cd, 0.6); }
+      if (e.st >= 0.5) { e.state = "neutral"; e.st = 0; e.cd = Math.max(e.cd, 0.5); }
       break;
   }
-  // não cai de telhados/viaduto: para à beira (e na patrulha dá meia-volta)
-  if (target !== 0 && e.onFloor && groundBelow(e.x + Math.sign(target) * 30, e.y - 4) > e.y + 8) {
-    if (e.state === "patrol") e.pdir = -e.pdir;
-    target = 0;
-  }
-  e.vx = approach(e.vx, target, 700 * dt);
+  e.vx = approach(e.vx, target, (e.state === "charge" ? 2400 : 700) * dt);
   e.vy = Math.min(e.vy + 1400 * dt, 900);
   moveAndSlide(e, e.w, e.h, dt);
-  // passos pesados: pó e baque (mais alto quanto mais perto do Kane)
+  // passos pesados
   if (Math.abs(e.vx) > 40 && e.onFloor) {
     e.stepT += dt;
-    if (e.stepT > (Math.abs(e.vx) > 80 ? 0.3 : 0.45)) {
+    if (e.stepT > (Math.abs(e.vx) > 200 ? 0.16 : Math.abs(e.vx) > 80 ? 0.3 : 0.45)) {
       e.stepT = 0;
       for (let i = 0; i < 3; i++) emit("dust", e.x - 12 * e.facing, e.y - 3, -e.facing * rand(30, 90), rand(-30, -8), rand(0.4, 0.6), rand(6, 9), 16, "back");
-      SFX.play("heavyStep", clamp(1 - adx / 700, 0.05, 1));
-      if (adx < 300) addTrauma(0.04);
+      SFX.play("heavyStep", clamp(1 - adx / 900, 0.2, 1));
+      addTrauma(Math.abs(e.vx) > 200 ? 0.08 : 0.03);
     }
   }
-  // mochila a fumegar e a soltar faíscas
   e.smokeT += dt;
   if (e.smokeT > 0.14) {
     e.smokeT = 0;
@@ -816,7 +903,7 @@ function drawBolts() {
   NORMAL();
 }
 function trooperDie(e) {
-  e.dead = 7.5; e.deathT = 0; e.vx = Math.sign(e.vx || -e.facing) * 60;
+  e.dead = 99; e.deathT = 0; e.vx = Math.sign(e.vx || -e.facing) * 60;
   SFX.play("zap"); addTrauma(0.2);
   spray("sparkHot", e.x, e.y - 80, 20, { speed: 380, life: 0.4, size: 2 });
 }
@@ -850,6 +937,9 @@ function trooperDeathUpdate(e, dt) {
 function trooperFrame(e) {
   if (e.dead > 0) return [2, Math.min(4, Math.floor(e.deathT / 0.13))];
   if (e.state === "aim" || e.state === "fire" || e.state === "cool") return [0, 1];
+  if (e.state === "charge") return [1, Math.floor(e.anim * 14) % 4];
+  if (e.state === "windup") return [1, 0];
+  if (e.state === "hitstun" || e.state === "stagger") return [2, 0];   // frame do primeiro impacto da derrota = reação ao golpe
   if (Math.abs(e.vx) > 30) return [1, Math.floor(e.anim * (Math.abs(e.vx) > 80 ? 9 : 6)) % 4];
   return [0, 0];
 }
@@ -859,7 +949,8 @@ function drawTrooper(e) {
   const sq = e.squash / 0.15, breathe = row === 0 && col === 0 ? Math.sin(e.anim * 2) * 0.012 : 0;
   const fade = e.dead > 0 && e.dead < 1 ? e.dead : 1;
   ctx.save();
-  ctx.translate(e.x - e.recoil * e.facing + (e.state === "stagger" ? rand(-2, 2) : 0), e.y);
+  const shake = e.state === "stagger" || e.state === "windup" || (e.state === "hitstun" && e.st < 0.1) ? rand(-2, 2) : 0;
+  ctx.translate(e.x - e.recoil * e.facing + shake, e.y);
   ctx.scale(e.facing * (1 + sq * 0.1), 1 - sq * 0.08 + breathe);
   ctx.globalAlpha = fade;
   ctx.drawImage(TROOPER, col * FW, row * FH, FW, FH, -OX, -OY, FW, FH);
@@ -943,19 +1034,18 @@ function castLaser(ox, oy, dx, dy, pierce = false) {
 function updateKane(dt) {
   if (k.dead) { k.vy = Math.min(k.vy + C.gravity * dt, C.maxFall); k.vx = approach(k.vx, 0, C.groundFriction * dt); moveAndSlide(k, C.bodyW, C.bodyH, dt); return; }
   updateExhaustion(dt);
-  const locked = k.exhausted || k.kneel > 0.3;     // ajoelhado: sem controlo até recuperar
+  k.stun = Math.max(0, k.stun - dt); k.dashCd = Math.max(0, k.dashCd - dt);
+  // sem controlo: ajoelhado, atordoado por um golpe, ou fora do tempo de luta (apresentação / K.O.)
+  const locked = k.exhausted || k.kneel > 0.3 || k.stun > 0 || fight.phase !== "fight";
   const inp = locked ? { x: 0, y: 0 } : inputVec();
   if (!locked && pressed("jump")) k.jumpBuf = C.jumpBuffer;
-  if (!locked && pressed("fly")) setFlying(!k.flying);
-  if (k.action === "none" || k.action === "charge") {
-    const f = inp.x > 0.1 ? 1 : inp.x < -0.1 ? -1 : k.facing;
-    if (f !== k.facing) {
-      k.facing = f; k.turnT = 0.09;
-      if (k.onFloor && Math.abs(k.vx) > 120) {   // derrapagem ao virar a correr
-        for (let i = 0; i < 5; i++) emit("dust", k.x, k.y - 3, -f * rand(60, 140), rand(-30, -5), rand(0.4, 0.6), rand(6, 9), 16, "back");
-      }
-    }
+  if (!locked && pressed("fly") && k.dashCd <= 0 && !(k.airDash && !k.onFloor) && (k.action === "none" || k.action === "punch")) startDash(inp);
+  // como nos jogos de luta: no chão está sempre virado para o adversário (no ar mantém o lado)
+  if (k.onFloor && (k.action === "none" || k.action === "charge") && !foe.dead) {
+    const f = foe.x >= k.x ? 1 : -1;
+    if (f !== k.facing) { k.facing = f; k.turnT = 0.09; }
   }
+  if (k.onFloor) k.airDash = false;
   k.jumpBuf = Math.max(k.jumpBuf - dt, 0);
   k.invuln = Math.max(k.invuln - dt, 0);
   k.coyote = k.onFloor ? C.coyote : Math.max(k.coyote - dt, 0);
@@ -979,14 +1069,16 @@ function updateKane(dt) {
       SFX.play("whoosh", k.energy);
     }
   } else if (k.action === "punch") {
-    if (k.t >= C.punchWindup && k.t - dt < C.punchWindup) punchImpactFx();
-    if (k.t >= C.punchWindup && k.t < C.punchWindup + C.punchActive) punchQuery();
-    else if (k.t >= C.punchWindup + C.punchActive + C.punchRecovery) start("none");
+    // combo: depois de acertar, um novo soco cancela a recuperação
+    if (!locked && pressed("punch") && k.hitIds.size && k.t >= C.punchWindup + C.punchActive * 0.5) { start("charge"); SFX.loopStart("charge"); }
+    else if (k.t >= C.punchWindup && k.t - dt < C.punchWindup) punchImpactFx();
+    if (k.action === "punch" && k.t >= C.punchWindup && k.t < C.punchWindup + C.punchActive) punchQuery();
+    if (k.action === "punch" && k.t >= C.punchWindup + C.punchActive + C.punchRecovery) start("none");
   } else if (k.action === "laser") {
     const dir = aimDir(inp); laserAimDy = dir.dy;
     const eye = eyeWorld();
     k.aim = castLaser(eye.x, eye.y, dir.dx, dir.dy, C.laserLevels[k.laserLevel - 1].pierce);
-    if (!held.laser) {
+    if (!held.laser || locked) {
       start("none");
       if (k.lastBeam) { laserEndFx(eye); SFX.loopStop("laser", 0.08); SFX.play("laserEnd"); }
       if (k.maxTime >= C.overloadMin) startExhaust(Math.min(C.kneelMax, C.kneelBase + k.maxTime * C.kneelPerSec));
@@ -1004,19 +1096,25 @@ function updateKane(dt) {
     if (d <= step) { k.vx = tx; k.vy = ty; } else { k.vx += dx / d * step; k.vy += dy / d * step; }
     if (k.onFloor && inp.y > 0.5) setFlying(false);
   } else {
-    const tx = inp.x * C.runSpeed * mult;
+    const back = inp.x * k.facing < -0.2;
+    k.blocking = back && k.onFloor && k.action === "none" && !locked;           // segurar para trás = defender
+    const tx = inp.x * C.runSpeed * mult * (back ? C.backMult : 1);
     const acc = k.onFloor ? (tx === 0 ? C.groundFriction : C.groundAccel) : C.airAccel;
-    k.vx = approach(k.vx, tx, acc * dt);
+    if (k.dashT > 0) {                                                          // dash: velocidade fixa, quase sem gravidade
+      k.dashT -= dt; k.vx = k.dashDir * C.dashSpeed * (0.4 + 0.6 * k.dashT / C.dashTime); k.vy = Math.min(k.vy, 60);
+      if (Math.random() < 0.6) { const [row, col] = kaneFrame(); ghosts.push({ x: k.x, y: k.y, row, col, facing: k.facing, rot: 0, pv: { x: 0, y: 0 }, t: 0.25 }); }
+    } else k.vx = approach(k.vx, k.stun > 0 ? 0 : tx, (k.stun > 0 ? 900 : acc) * dt);
     k.vy = Math.min(k.vy + C.gravity * (k.vy > 0 ? C.fallMult : 1) * dt, C.maxFall);
-    const canJump = k.action !== "punch" && k.action !== "laser";
-    if (k.jumpBuf > 0 && canJump) {
-      if (k.coyote > 0) { k.vy = C.jumpVel; k.jumpBuf = 0; k.coyote = 0; jumped = true; }
-      else if (pressed("jump")) { setFlying(true); k.jumpBuf = 0; }
+    const canJump = k.action !== "punch" && k.action !== "laser" && !locked;
+    if (k.jumpBuf > 0 && canJump && k.coyote > 0) {
+      // salto com direção (para a frente/para trás) como nos jogos de luta
+      k.vy = C.jumpVel; k.jumpBuf = 0; k.coyote = 0; jumped = true;
+      if (Math.abs(inp.x) > 0.3) k.vx = Math.sign(inp.x) * C.runSpeed * 1.05;
     }
     if (released("jump") && k.vy < 0) k.vy *= C.jumpCut;
   }
   moveAndSlide(k, C.bodyW, C.bodyH, dt);
-  if (k.y < 150) { k.y = 150; k.vy = Math.max(k.vy, 0); }   // teto do céu
+  if (k.y < 400) { k.y = 400; k.vy = Math.max(k.vy, 0); }   // teto da arena
 
   k.fury = C.maxFury;                                           // energia infinita
   if (!k.beam) k.laserPow = Math.max(0, k.laserPow - C.powerDecay * dt);   // potência dissipa-se sem feixe
@@ -1025,18 +1123,48 @@ function updateKane(dt) {
   movementFx(dt, wasFloor, fallSpeed, jumped);
   ambientFx(dt);
 
-  const kr = bodyRect(k, C.bodyW, C.bodyH);
-  for (const e of enemies) if (enemyAlive(e) && k.invuln <= 0 && overlap(kr, bodyRect(e, e.w, e.h))) hurtKane(10, Math.sign(k.x - e.x || 1));
+  // os dois lutadores não se atravessam: empurram-se
+  if (!foe.dead && Math.abs(k.y - foe.y) < 90) {
+    const minD = (C.bodyW + foe.w) / 2, d = k.x - foe.x;
+    if (Math.abs(d) < minD) {
+      const push = (minD - Math.abs(d)) / 2 * (Math.sign(d) || k.facing * -1);
+      k.x = clamp(k.x + push, ARENA_L + 14, ARENA_R - 14); foe.x = clamp(foe.x - push, ARENA_L + 22, ARENA_R - 22);
+    }
+  }
 }
-function hurtKane(dmg, dir) {
-  if (k.invuln > 0 || k.dead) return;
-  k.hp = Math.max(0, k.hp - dmg); k.invuln = C.invuln; k.hurtFlash = 0.25;
-  k.vx = dir * 260; k.vy = k.exhausted ? 0 : -220;
-  if (!k.exhausted) start("none");
-  addTrauma(0.35, dir * 6, 0); flash(0.25, PAL.red);
+function startDash(inp) {
+  const dir = Math.abs(inp.x) > 0.2 ? Math.sign(inp.x) : k.facing;
+  k.dashT = C.dashTime; k.dashDir = dir; k.dashCd = C.dashCd; k.invuln = Math.max(k.invuln, 0.1);
+  if (!k.onFloor) { k.airDash = true; k.vy = Math.min(k.vy, -60); }
+  if (k.action === "punch") start("none");
+  SFX.play("dash");
+  ring({ x: k.x - dir * 10, y: k.y - 60, r0: 6, r1: 50, arc: Math.PI * 0.8, facing: -dir, hex: PAL.cyan, width: 4, dur: 0.2 });
+  spray("sparkCyan", k.x - dir * 14, k.y - 60, 12, { speed: 340, dir: dir > 0 ? Math.PI : 0, spread: 0.9, life: 0.25, size: 1.8 });
+  if (k.onFloor) for (let i = 0; i < 8; i++) emit("dust", k.x, k.y - 3, -dir * rand(80, 220), rand(-40, -10), rand(0.4, 0.6), rand(6, 9), 18, "back");
+}
+function hurtKane(dmg, dir, heavy = false) {
+  if (k.dead || (k.invuln > 0 && k.dashT > 0) || fight.phase !== "fight") return;
+  if (k.invuln > 0 && !heavy) return;
+  // defesa: segurar para trás virado para o ataque (o ataque empurra no sentido "dir")
+  if (k.blocking && k.facing === -dir) {
+    k.hp = Math.max(1, k.hp - dmg * C.blockChip); k.stun = heavy ? 0.28 : 0.16; k.vx = dir * (heavy ? 300 : 160);
+    const sx = k.x + k.facing * 22, sy = k.y - 70;
+    ring({ x: sx, y: sy, r0: 10, r1: 46, arc: Math.PI * 0.9, facing: k.facing, hex: PAL.cyan, width: 6, dur: 0.22 });
+    spray("sparkCyan", sx, sy, 14, { speed: 300, dir: k.facing > 0 ? 0 : Math.PI, spread: 1.8, life: 0.25, size: 1.8 });
+    light(sx, sy, 120, PAL.cyan, 1); addTrauma(0.12); hitstop = Math.max(hitstop, 0.04);
+    SFX.play("block"); floats.push({ x: sx, y: sy - 50, v: "DEFESA", t: 0.6, t0: 0.6, big: true, col: PAL.cyanSoft });
+    return;
+  }
+  k.hp = Math.max(0, k.hp - dmg); k.invuln = heavy ? 0.45 : 0.22; k.hurtFlash = 0.25;
+  k.stun = heavy ? 0.55 : 0.32; k.dashT = 0;
+  k.vx = dir * (heavy ? 420 : 240); k.vy = heavy ? -320 : (k.onFloor ? 0 : -120);
+  if (k.action === "laser" && k.lastBeam) laserEndFx(eyeWorld());
+  start("none");
+  addTrauma(heavy ? 0.5 : 0.3, dir * 6, 0); flash(heavy ? 0.3 : 0.18, PAL.red); hitstop = Math.max(hitstop, heavy ? 0.09 : 0.05);
   SFX.play("hurt"); SFX.loopStop("charge", 0.05); SFX.loopStop("laser", 0.05);
-  spray("sparkHot", k.x, k.y - 60, 14, { speed: 300, life: 0.35, size: 2 });
-  if (k.hp <= 0) { k.dead = true; k.flying = false; SFX.loopStop("flight"); setTimeout(respawn, 1500); }
+  spray("sparkHot", k.x, k.y - 60, heavy ? 24 : 14, { speed: 320, life: 0.35, size: 2 });
+  fight.foeCombo = (fight.foeComboT > 0 ? fight.foeCombo : 0) + 1; fight.foeComboT = 1.2;
+  if (k.hp <= 0) { k.dead = true; k.vy = -380; k.vx = dir * 260; }
 }
 
 // ---------------------------------------------------------------- exaustão: perder forças e ajoelhar
@@ -1080,7 +1208,7 @@ function kneelPoint(p) {
   const dx = p.x, dy = p.y - HIP, c = Math.cos(a), sn = Math.sin(a);
   return { x: k.x + (dx * c - dy * sn - 4 * kp) * k.facing, y: k.y + HIP + drop + dx * sn + dy * c };
 }
-function respawn() { Object.assign(k, { x: 200, y: FLOOR_Y, vx: 0, vy: 0, hp: C.maxHp, fury: C.maxFury, dead: false, invuln: 1, action: "none" }); }
+function respawn_unused() { Object.assign(k, { x: 200, y: FLOOR_Y, vx: 0, vy: 0, hp: C.maxHp, fury: C.maxFury, dead: false, invuln: 1, action: "none" }); }
 
 // ---------------------------------------------------------------- estado de animação
 function updateAnimState() {
@@ -1095,6 +1223,8 @@ function updateAnimState() {
 // [linha, coluna, pose]
 function kaneFrame() {
   if (k.kneel > 0.01) return [ROW.punch, 0, "kneel"];
+  if (k.stun > 0 && !k.dead) return k.blocking ? [ROW.punch, 0, "block"] : [ROW.punch, 2, "hurt"];   // recuo = reação ao golpe
+  if (k.blocking) return [ROW.punch, 0, "block"];
   // laser no ar: pose de pairar (a guarda é uma postura de pés no chão)
   if (k.action === "laser" && (k.flying || !k.onFloor)) return [ROW.idle, 0, "airLaser"];
   if (k.action === "laser" || k.action === "charge") return [ROW.punch, 0, "attack"];
@@ -1130,6 +1260,8 @@ function movementFx(dt, wasFloor, fallSpeed, jumped) {
   else if (pose === "hover") rotTarget = clamp(k.vx * k.facing / C.flightSpeed * 0.35, -0.2, 0.3) + clamp(-k.vy / C.flightSpeed, -1, 1) * 0.05;
   else if (pose === "run") rotTarget = 0.1 * Math.min(Math.abs(k.vx) / C.runSpeed, 1);
   else if (pose === "air") rotTarget = clamp(k.vx * k.facing / C.runSpeed * 0.08, -0.08, 0.08);
+  else if (pose === "hurt") rotTarget = -0.18;
+  else if (pose === "block") rotTarget = -0.04;
   if (k.action === "laser") rotTarget = laserAimDy * 0.16;   // corpo acompanha a mira: inclina para trás a apontar para cima
   k.rot += (rotTarget - k.rot) * Math.min(1, dt * (pose === "fly" ? 7 : 10));
 
@@ -1441,7 +1573,8 @@ function drawGhosts() {
     ctx.save(); ctx.globalAlpha = Math.pow(g.t / 0.25, 1.5) * 0.16;
     ctx.translate(g.x, g.y); ctx.scale(g.facing, 1);
     if (g.rot) { ctx.translate(g.pv.x, g.pv.y); ctx.rotate(g.rot); ctx.translate(-g.pv.x, -g.pv.y); }
-    drawSprite(tex, g.row, g.col);
+    if (g.trooper) { if (TROOPER.naturalWidth) ctx.drawImage(tinted(PAL.ember, TROOPER), g.col * FW, g.row * FH, FW, FH, -OX, -OY, FW, FH); }
+    else drawSprite(tex, g.row, g.col);
     ctx.restore();
   }
   NORMAL();
@@ -1618,29 +1751,86 @@ function drawLaser() {
 // ---------------------------------------------------------------- HUD e ecrã
 function drawHud() {
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  const x = 16 + safeLeft, y = 16 + safeTop;
-  const bar = (label, v, max, col, yy, glowHex) => {
-    ctx.fillStyle = "#e8e3d6"; ctx.font = "12px Silkscreen, monospace"; ctx.fillText(label, x, yy + 11);
-    ctx.fillStyle = "#000a"; ctx.fillRect(x + 50, yy, 160, 12);
-    ctx.fillStyle = col; ctx.fillRect(x + 50, yy, 160 * v / max, 12);
-    ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(x + 50, yy, 160 * v / max, 3);
-    ctx.strokeStyle = "#e8e3d655"; ctx.strokeRect(x + 50.5, yy + 0.5, 159, 11);
-    if (glowHex) { ADD(); glow(x + 50 + 160 * v / max, yy + 6, 14, glowHex, 0.6); NORMAL(); }
+  const W = cv.width / scale, H = cv.height / scale, top = 12 + safeTop, cx = W / 2;
+  const edge = 16 + safeLeft;
+  const barW = Math.max(90, Math.min(280, cx - 40 - edge - 36)), barH = 14;
+  // retratos (recortes da cabeça nos atlases)
+  const portrait = (img, sx, sy, x, flip) => {
+    ctx.fillStyle = "#0b0a10"; ctx.fillRect(x - 1, top - 1, 32, 32);
+    ctx.save(); ctx.beginPath(); ctx.rect(x, top, 30, 30); ctx.clip();
+    if (flip) { ctx.translate(x + 30, top); ctx.scale(-1, 1); ctx.drawImage(img, sx, sy, 26, 26, -2, -2, 34, 34); }
+    else ctx.drawImage(img, sx, sy, 26, 26, x - 2, top - 2, 34, 34);
+    ctx.restore(); ctx.strokeStyle = "#e8e3d688"; ctx.strokeRect(x - 0.5, top - 0.5, 31, 31);
   };
-  bar("HP", k.hp, C.maxHp, "#3fbf5a", y);
-  // barra LASER = potência do feixe (energia é infinita): a cor é a do nível atual e as marcas são os níveis
-  const lvNow = powerLevel(k.laserPow), LVn = C.laserLevels[lvNow - 1];
-  bar("LASER", k.laserPow, C.powerFull, k.laserPow > 0.01 ? LVn.mid : "#3a2a2e", y + 20, k.beam ? LVn.outer : null);
+  const lx = edge + 36, rx = W - edge - 36;
+  if (ATLAS.naturalWidth) portrait(ATLAS, OX + 6 - 13, OY - 131, edge, false);
+  if (TROOPER.naturalWidth) portrait(TROOPER, OX + 4 - 13, OY - 130, W - edge - 30, true);
+  // barras de vida: esvaziam do lado do relógio; atrás, o "dano recente" em claro
+  const bar = (x, w, pct, trail, fromLeft, col) => {
+    ctx.fillStyle = "#000c"; ctx.fillRect(x - 2, top + 2, w + 4, barH + 4);
+    ctx.fillStyle = "#3a0d12"; ctx.fillRect(x, top + 4, w, barH);
+    const tw = w * clamp(trail, 0, 1), pw = w * clamp(pct, 0, 1);
+    ctx.fillStyle = "#ffe0a0"; ctx.fillRect(fromLeft ? x : x + w - tw, top + 4, tw, barH);
+    ctx.fillStyle = pct < 0.25 && Math.floor(time * 5) % 2 ? "#ff5a3a" : col; ctx.fillRect(fromLeft ? x : x + w - pw, top + 4, pw, barH);
+    ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.fillRect(fromLeft ? x : x + w - pw, top + 4, pw, 3);
+    ctx.strokeStyle = "#e8e3d6aa"; ctx.strokeRect(x - 0.5, top + 3.5, w + 1, barH + 1);
+  };
+  bar(lx, barW, k.hp / C.maxHp, k.hpTrail / C.maxHp, true, "#f2c14a");
+  bar(rx - barW, barW, Math.max(0, foe.hp) / foe.maxHp, fight.foeTrail / foe.maxHp, false, "#f2c14a");
   ctx.font = "10px Silkscreen, monospace";
-  for (const [i, lv] of [[2, C.laserLevels[1]], [3, C.laserLevels[2]]]) {
-    const mx = x + 50 + 160 * lv.at / C.powerFull;
-    ctx.fillStyle = "#e8e3d6aa"; ctx.fillRect(mx, y + 17, 1, 18);
-    ctx.fillStyle = lvNow >= i ? lv.mid : "#e8e3d666"; ctx.fillText(i === 3 ? "MÁX" : "NV" + i, mx - 8, y + 44);
+  ctx.fillStyle = "#e8e3d6"; ctx.textAlign = "left"; ctx.fillText("KANE", lx, top + 32);
+  ctx.textAlign = "right"; ctx.fillText(barW > 150 ? "SOLDADO DE CHOQUE" : "SOLDADO", rx, top + 32);
+  // vitórias por ronda (quadrados junto ao relógio)
+  for (let i = 0; i < 2; i++) {
+    ctx.fillStyle = i < fight.kWins ? "#ff3344" : "#ffffff22"; ctx.fillRect(lx + barW - 10 - i * 12, top + 24, 8, 8);
+    ctx.fillStyle = i < fight.fWins ? "#ff3344" : "#ffffff22"; ctx.fillRect(rx - barW + 2 + i * 12, top + 24, 8, 8);
   }
-  ctx.fillStyle = "#e8e3d6"; ctx.fillText("∞", x + 216, y + 31);
-  if (k.laserPow > 0.01) { ctx.fillStyle = LVn.core === "#ffffff" ? "#ffd27a" : LVn.core; ctx.fillText("NV " + lvNow, x + 230, y + 31); }
-  ctx.fillStyle = k.exhausted ? (Math.floor(time * 4) % 2 ? "#ff6a5c" : "#8a8f9c") : "#8a8f9c";
-  ctx.fillText(k.exhausted ? "SOBRECARGA — A RECUPERAR" : k.flying ? "MODO: VOO" : "MODO: SOLO", x, y + 60);
+  // relógio
+  ctx.fillStyle = "#0b0a10e0"; ctx.fillRect(cx - 24, top - 2, 48, 34); ctx.strokeStyle = "#e8e3d688"; ctx.strokeRect(cx - 23.5, top - 1.5, 47, 33);
+  ctx.textAlign = "center"; ctx.font = "22px Silkscreen, monospace";
+  ctx.fillStyle = fight.timer < 10 && Math.floor(time * 4) % 2 ? "#ff5a3a" : "#e8e3d6";
+  ctx.fillText(String(Math.ceil(fight.timer)).padStart(2, "0"), cx, top + 24);
+  // potência do laser por baixo do nome do Kane (como uma barra de super)
+  const lvNow = powerLevel(k.laserPow), LVn = C.laserLevels[lvNow - 1], mw = Math.min(140, barW * 0.6), my = top + 40;
+  ctx.fillStyle = "#000a"; ctx.fillRect(lx, my, mw, 6);
+  ctx.fillStyle = k.laserPow > 0.01 ? LVn.mid : "#3a2a2e"; ctx.fillRect(lx, my, mw * k.laserPow / C.powerFull, 6);
+  for (const lv of [C.laserLevels[1], C.laserLevels[2]]) { ctx.fillStyle = "#e8e3d6aa"; ctx.fillRect(lx + mw * lv.at / C.powerFull, my - 2, 1, 10); }
+  ctx.textAlign = "left"; ctx.font = "8px Silkscreen, monospace"; ctx.fillStyle = "#e8e3d6aa";
+  ctx.fillText(k.laserPow > 0.01 ? "LASER NV " + lvNow : "LASER", lx + mw + 6, my + 6);
+  if (k.exhausted) { ctx.fillStyle = Math.floor(time * 4) % 2 ? "#ff6a5c" : "#8a8f9c"; ctx.fillText("SOBRECARGA", lx, my + 18); }
+  // contadores de combo
+  const combo = (n, x, align, col) => {
+    ctx.textAlign = align; ctx.font = "20px Silkscreen, monospace";
+    ctx.fillStyle = "#000"; ctx.fillText(n + " GOLPES", x + 2, H * 0.36 + 2);
+    ctx.fillStyle = col; ctx.fillText(n + " GOLPES", x, H * 0.36);
+  };
+  if (fight.combo >= 2 && fight.comboT > 0) combo(fight.combo, edge, "left", "#ffd27a");
+  if (fight.foeCombo >= 2 && fight.foeComboT > 0) combo(fight.foeCombo, W - edge, "right", "#ff8a6a");
+  // textos de ronda
+  const big = (text, size, col, t) => {
+    const pop = 1 + Math.max(0, 0.25 - t) * 2;
+    ctx.save(); ctx.translate(cx, H * 0.42); ctx.scale(pop, pop); ctx.textAlign = "center";
+    ctx.font = size + "px Silkscreen, monospace";
+    ctx.fillStyle = "#000"; ctx.fillText(text, 3, 3); ctx.fillStyle = col; ctx.fillText(text, 0, 0);
+    ctx.restore();
+  };
+  if (fight.phase === "intro") {
+    if (fight.t < 1.05) big("ROUND " + fight.round, 34, "#e8e3d6", fight.t);
+    else big("LUTA!", 48, "#ff3344", fight.t - 1.05);
+  } else if (fight.phase === "ko") {
+    big(fight.text, 56, "#ff3344", fight.t);
+    if (fight.t > 1.6) {
+      ctx.textAlign = "center"; ctx.font = "14px Silkscreen, monospace"; ctx.fillStyle = "#e8e3d6";
+      ctx.fillText(fight.winner === "kane" ? "KANE VENCE A RONDA" : "O SOLDADO VENCE A RONDA", cx, H * 0.42 + 34);
+    }
+  } else if (fight.phase === "end") {
+    big(fight.kWins >= 2 ? "VITÓRIA!" : "DERROTA", 44, fight.kWins >= 2 ? "#ffd27a" : "#ff3344", fight.t);
+    if (fight.t > 1.5) {
+      ctx.textAlign = "center"; ctx.font = "11px Silkscreen, monospace"; ctx.fillStyle = "#e8e3d6";
+      ctx.fillText("CARREGA EM QUALQUER BOTÃO PARA JOGAR OUTRA VEZ", cx, H * 0.42 + 34);
+    }
+  }
+  ctx.textAlign = "left";
 }
 function drawScreenFx() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1673,14 +1863,17 @@ function srand(seed) { const x = Math.sin(seed * 127.1) * 43758.5453; return x -
 let camView = { S: 1, cx: 0, cy: 0 };
 function worldToScreen(x, y) { return { x: (x - camView.cx) * camView.S + cv.width / 2, y: (y - camView.cy) * camView.S + cv.height / 2 }; }
 function render() {
-  // câmara: segue com antecipação na direção do olhar, zoom nos impactos, tremor por trauma
-  const zoom = 1 + cam.kick;
+  // câmara de jogo de luta: enquadra os dois lutadores, aproxima quando estão perto, zoom nos impactos
+  const dist = Math.abs(k.x - foe.x);
+  const wantW = clamp(dist + 460, 620, Math.max(620, viewW));
+  cam.zoom += (clamp(viewW / wantW, 1, 1.4) - cam.zoom) * 0.06;
+  const zoom = cam.zoom + cam.kick;
   const visW = viewW / zoom, visH = viewH / zoom;
-  const lookX = k.x + k.facing * 50 + k.vx * 0.15;
-  cam.x += (clamp(lookX, visW / 2, WORLD_W - visW / 2) - cam.x) * 0.12;
-  // vertical: segue o Kane quando sobe (telhados, torre), com o chão a ~60 px do fundo quando está na rua
-  const lookY = k.y - 90 + (k.flying ? k.vy * 0.12 : 0);
-  cam.y += (clamp(lookY, visH / 2 + 60, FLOOR_Y + 60 - visH / 2) - cam.y) * 0.08;
+  const midX = (k.x + foe.x) / 2;
+  cam.x += (clamp(midX, visW / 2, WORLD_W - visW / 2) - cam.x) * 0.1;
+  const highest = Math.min(k.y, foe.y);
+  const lookY = FLOOR_Y + 70 - visH / 2 - Math.max(0, FLOOR_Y - highest - visH * 0.45) * 0.8;
+  cam.y += (lookY - cam.y) * 0.1;
   const tr = cam.trauma * cam.trauma, n = time * 30 + cam.seed;
   const shx = tr * 16 * (Math.sin(n * 1.7) + Math.sin(n * 3.1) * 0.5) + cam.dirX * tr;
   const shy = tr * 12 * (Math.sin(n * 2.3 + 1) + Math.sin(n * 4.3) * 0.5) + cam.dirY * tr;
@@ -1735,11 +1928,13 @@ function frame(now) {
   while (acc >= STEP) {
     time += STEP;
     syncInput();
+    updateFight(STEP);
+    const dtg = fight.phase === "ko" && fight.t < 1.4 ? STEP * 0.3 : STEP;   // K.O. em câmara lenta
     if (hitstop > 0) { hitstop -= STEP; updateParticles(STEP * 0.2); }      // hit-stop: o mundo quase para
     else {
       lights.length = 0;
-      updateKane(STEP); updateEnemies(STEP); updateBolts(STEP); updateProps(STEP); Object.assign(prev, held);
-      updateParticles(STEP);
+      updateKane(dtg); updateEnemies(dtg); updateBolts(dtg); updateProps(dtg); Object.assign(prev, held);
+      updateParticles(dtg);
       k.beamFade = Math.max(0, k.beamFade - (k.beam ? 0 : STEP));
       for (let i = ghosts.length - 1; i >= 0; i--) if ((ghosts[i].t -= STEP) <= 0) ghosts.splice(i, 1);
     }
@@ -1752,4 +1947,6 @@ function frame(now) {
   render();
   requestAnimationFrame(frame);
 }
+startRound(1);
+setTimeout(() => { const h = document.getElementById("help"); if (h) h.classList.add("gone"); }, 9000);   // ajuda some depois de uns segundos
 requestAnimationFrame(frame);
