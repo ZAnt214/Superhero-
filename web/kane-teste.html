@@ -1076,6 +1076,8 @@ function hitEnemy(e, dmg, kx, ky, stagger = false) {
   fight.combo = comboOn ? fight.combo + 1 : 1; fight.comboT = 1.0;
   const scaled = dmg * Math.max(0.5, 1 - (fight.combo - 1) * 0.08);   // dano decresce em combos longos
   e.hp -= scaled; e.vx += kx * (heavy ? 0.35 : 1); e.vy += ky * (heavy ? 0.2 : 1); e.flash = 0.1; e.squash = 0.15;
+  // tremor no ponto atingido (lado da frente, à altura do golpe) e o tronco dobra para trás
+  jiggle(e, 16, -60 - Math.random() * 30, Math.min(7, 2.5 + scaled * 0.08)); e.bendV = (e.bendV || 0) - Math.min(70, 20 + scaled * 1.2);
   floats.push({ x: e.x + rand(-10, 10), y: e.y - e.h - 10, v: Math.round(scaled), t: 0.8, big: scaled > 30 });
   if (heavy) {
     if (e.hp <= 0) { trooperDie(e); return; }
@@ -1126,6 +1128,10 @@ function updateTrooper(e, dt) {
   if (e.dead > 0) { trooperDeathUpdate(e, dt); return; }
   e.st += dt; e.anim += dt; e.cd -= dt;
   e.walkPh = (e.walkPh || 0) + Math.abs(e.vx) * dt * 0.05; e.turnT = Math.max(0, (e.turnT || 0) - dt);
+  const ela = (e.vx - (e.prevVx ?? e.vx)) / Math.max(dt, 1e-4) * e.facing; e.prevVx = e.vx;
+  spring(e, "bend", clamp(-ela * 0.004, -6, 6) + (e.state === "charge" ? 4 : e.state === "windup" ? -3 : Math.sin(time * 1.3 + e.home) * 0.8), 70, 8, dt);
+  spring(e, "land", e.state === "windup" ? 1 : 0, 120, 9, dt);
+  if (e.jig) e.jig.t += dt;
   const dx = k.x - e.x, adx = Math.abs(dx);
   if (e.onFloor && e.state !== "charge" && e.state !== "fire" && e.state !== "aim") {
     const f = Math.sign(dx) || e.facing;
@@ -1350,10 +1356,13 @@ function drawTrooper(e) {
   const turn = e.turnT > 0 ? 0.4 + 0.6 * (1 - e.turnT / 0.1) : 1;
   ctx.scale(e.facing * turn * (1 + sq * 0.1), 1 - sq * 0.08 + breathe);
   ctx.globalAlpha = fade;
-  ctx.drawImage(TROOPER, col * FW, row * FH, FW, FH, -OX, -OY, FW, FH);
+  // derrota (destroços) desenha-se rígida; vivo, o corpo deforma-se
+  const field = e.dead > 0 ? null : trooperField(e);
+  const draw = img => field ? drawWarped(img, TROOPER, "T", row, col, field) : ctx.drawImage(img, col * FW, row * FH, FW, FH, -OX, -OY, FW, FH);
+  draw(TROOPER);
   ADD();
-  if (e.flash > 0) { ctx.globalAlpha = 0.85 * fade; ctx.drawImage(tinted("#ffffff", TROOPER), col * FW, row * FH, FW, FH, -OX, -OY, FW, FH); }
-  if (e.state === "fire" && e.st < 0.45) { ctx.globalAlpha = 0.25; ctx.drawImage(tinted(PAL.ember, TROOPER), col * FW, row * FH, FW, FH, -OX, -OY, FW, FH); }   // iluminado pelo disparo
+  if (e.flash > 0) { ctx.globalAlpha = 0.85 * fade; draw(tinted("#ffffff", TROOPER)); }
+  if (e.state === "fire" && e.st < 0.45) { ctx.globalAlpha = 0.25; draw(tinted(PAL.ember, TROOPER)); }   // iluminado pelo disparo
   if (e.dead <= 0) {
     const v = row === 0 && col === 1 ? TR.visorAim : row === 0 ? TR.visorStand : { x: 18, y: -98 };
     glow(v.x, v.y, 12, "#ff7a2a", 0.55 + 0.2 * Math.sin(time * 4 + e.home));
@@ -1545,6 +1554,7 @@ function hurtKane(dmg, dir, heavy = false) {
   // defesa: segurar para trás virado para o ataque (o ataque empurra no sentido "dir")
   if (k.blocking && k.facing === -dir) {
     k.hp = Math.max(1, k.hp - dmg * C.blockChip); k.stun = heavy ? 0.28 : 0.16; k.vx = dir * (heavy ? 300 : 160);
+    jiggle(k, 30, -64, 2.5); k.bendV = (k.bendV || 0) - 20;
     const sx = k.x + k.facing * 22, sy = k.y - 70;
     ring({ x: sx, y: sy, r0: 10, r1: 46, arc: Math.PI * 0.9, facing: k.facing, hex: PAL.cyan, width: 6, dur: 0.22 });
     spray("sparkCyan", sx, sy, 14, { speed: 300, dir: k.facing > 0 ? 0 : Math.PI, spread: 1.8, life: 0.25, size: 1.8 });
@@ -1553,6 +1563,7 @@ function hurtKane(dmg, dir, heavy = false) {
     return;
   }
   k.hp = Math.max(0, k.hp - dmg); k.invuln = heavy ? 0.45 : 0.22; k.hurtFlash = 0.25;
+  jiggle(k, 18, -78, heavy ? 6 : 3.5); k.bendV = (k.bendV || 0) - (heavy ? 60 : 35);   // dobra para trás com o golpe
   k.stun = heavy ? 0.55 : 0.32; k.dashT = 0;
   k.vx = dir * (heavy ? 420 : 240); k.vy = heavy ? -320 : (k.onFloor ? 0 : -120);
   if (k.action === "laser" && k.lastBeam) laserEndFx(eyeWorld());
@@ -1679,6 +1690,15 @@ function movementFx(dt, wasFloor, fallSpeed, jumped) {
       addTrauma(0.2 + heavy * 0.25, 0, 4);
     }
   }
+  // molas do corpo: o tronco fica para trás ao acelerar e segue em frente ao travar; capa arrasta-se
+  const la = (k.vx - (k.prevVx ?? k.vx)) / Math.max(dt, 1e-4) * k.facing; k.prevVx = k.vx;
+  const idleSway = pose === "stance" ? Math.sin(time * 1.7) * 2 : 0;
+  spring(k, "bend", clamp(-la * 0.0045, -7, 7) + idleSway + (pose === "walk" ? Math.sign(k.vx * k.facing) * 1.4 : 0), 90, 9, dt);
+  spring(k, "cape", clamp(-k.vx * k.facing * 0.035, -8, 8) - (k.onFloor ? 0 : clamp(k.vy * 0.012, -5, 5)), 40, 6, dt);
+  spring(k, "land", 0, 160, 10, dt);
+  if (k.jig) k.jig.t += dt;
+  if (jumped) k.landV = (k.landV || 0) - 30;
+  if (k.onFloor && !wasFloor) k.landV = (k.landV || 0) + Math.min(fallSpeed, 900) * 0.07;
   // fase da passada avança com a distância percorrida (não com o tempo): pés não "patinam"
   const lastPh = k.walkPh; k.walkPh += Math.abs(k.vx) * dt * 0.05;
   if (pose === "walk" || pose === "run") {   // pó e som em cada passo (meia volta da fase)
@@ -1941,19 +1961,102 @@ function kaneTransform(pose) {
 function drawSprite(img, row, col, x = -OX, y = -OY) { ctx.drawImage(img, col * FW, row * FH, FW, FH, x, y, FW, FH); }
 // Pose de joelhos gerada a partir da guarda: pernas comprimidas a partir dos pés (joelho dobrado)
 // e tronco a descer, cabeça baixa e a arfar. Transição contínua com k.kneel (0 → 1).
-function drawPose(img, row, col, pose, ox = 0, oy = 0) {
-  if (pose === "ground" || pose === "stance" || pose === "walk" || pose === "block") {
-    // respiração: só o tronco sobe e desce (pernas fixas no chão), com ombros a abrir ligeiramente
-    const amp = pose === "walk" ? 0.5 : pose === "block" ? 0.3 : 1;
-    const br = (Math.sin(time * (pose === "stance" ? 3 : 2.4)) * 0.5 + 0.5) * amp, CHEST = row === ROW.punch ? -56 : -62;
-    ctx.save(); ctx.beginPath(); ctx.rect(-OX, CHEST, FW, -CHEST + 8); ctx.clip();
-    drawSprite(img, row, col, -OX + ox, -OY + oy); ctx.restore();
-    ctx.save(); ctx.beginPath(); ctx.rect(-OX, -OY - 10, FW, OY + 10 + CHEST); ctx.clip();
-    ctx.translate(0, CHEST); ctx.scale(1 + br * 0.015, 1 + br * 0.01); ctx.translate(0, -CHEST - br * 1.5);
-    drawSprite(img, row, col, -OX + ox, -OY + oy); ctx.restore();
-    return;
+
+// ---------------------------------------------------------------- corpo vivo: deformação procedural dos sprites
+// Cada pose é um só frame desenhado. Para o corpo não parecer um bloco rígido, o sprite é
+// desenhado como uma malha de células de 6 px, e cada célula desloca-se por um "campo":
+// o tronco dobra (mola que reage à aceleração), o peito respira, a capa ondula e fica para
+// trás com o movimento, as pernas alternam a andar, e o corpo treme a partir do ponto de impacto.
+const CELL = 6, _d = [0, 0];
+const maskCache = new Map();
+function cellMask(img, id, row, col) {
+  const key = id + row + "_" + col;
+  let m = maskCache.get(key);
+  if (m) return m;
+  const c = makeCanvas(FW, FH), g = c.getContext("2d");
+  g.drawImage(img, col * FW, row * FH, FW, FH, 0, 0, FW, FH);
+  const d = g.getImageData(0, 0, FW, FH).data, cells = [];
+  for (let cy = 0; cy < FH; cy += CELL) for (let cx = 0; cx < FW; cx += CELL) {
+    let any = false;
+    for (let y = cy; y < Math.min(cy + CELL, FH) && !any; y++) for (let x = cx; x < Math.min(cx + CELL, FW); x++) if (d[(y * FW + x) * 4 + 3] > 0) { any = true; break; }
+    if (any) cells.push(cx, cy);
   }
-  if (pose !== "kneel") return drawSprite(img, row, col, -OX + ox, -OY + oy);
+  m = new Int16Array(cells); maskCache.set(key, m);
+  return m;
+}
+function drawWarped(img, maskImg, id, row, col, field, ox = 0, oy = 0) {
+  const cells = cellMask(maskImg, id, row, col), sx0 = col * FW, sy0 = row * FH;
+  for (let i = 0; i < cells.length; i += 2) {
+    const cx = cells[i], cy = cells[i + 1], cw = Math.min(CELL, FW - cx), ch = Math.min(CELL, FH - cy);
+    const d = field(cx - OX + cw / 2, cy - OY + ch / 2);
+    // +0,5 px de sobreposição para não abrir frestas entre células
+    ctx.drawImage(img, sx0 + cx, sy0 + cy, cw, ch, cx - OX + ox + d[0] - 0.25, cy - OY + oy + d[1] - 0.25, cw + 0.5, ch + 0.5);
+  }
+}
+// mola amortecida: valor persegue o alvo com atraso e um pequeno balanço (follow-through)
+function spring(o, key, target, stiff, damp, dt) {
+  let v = o[key + "V"] || 0;
+  v += (target - (o[key] || 0)) * stiff * dt; v *= Math.exp(-damp * dt);
+  o[key] = (o[key] || 0) + v * dt; o[key + "V"] = v;
+}
+function jiggle(o, x, y, amp) { o.jig = { x, y, t: 0, amp }; }
+function kaneField(pose) {
+  const bend = k.bend || 0, cape = k.cape || 0, land = k.land || 0;
+  const brAmp = pose === "stance" ? 1 : pose === "walk" ? 0.6 : pose === "block" ? 0.3 : 0.5;
+  const br = (Math.sin(time * (pose === "stance" ? 3 : 2.4)) * 0.5 + 0.5) * brAmp;
+  const wave = 1 + Math.min(Math.abs(k.vx) / C.runSpeed, 1) * 1.6 + (k.onFloor ? 0 : 1.2);
+  const walking = pose === "walk", ph = k.walkPh, j = k.jig, jt = j ? j.t : 9;
+  const guard = pose === "stance" || pose === "walk" || pose === "block";
+  const recoil = k.beam ? (0.6 + k.laserLevel * 0.7) : 0, buzz = k.beam ? Math.sin(time * 90) * 0.35 * k.laserLevel : 0;
+  return (x, y) => {
+    const h = clamp(-y / 130, 0, 1), h2 = h * h;
+    let dx = bend * h2, dy = land * h * 5;
+    const chest = Math.exp(-(((y + 80) / 18) ** 2));                       // respiração
+    dx += x * br * 0.03 * chest; dy -= br * 1.3 * h2;
+    const back = clamp((-x - 6) / 36, 0, 1) * clamp((y + 112) / 50, 0, 1);  // capa (atrás do corpo, abaixo dos ombros)
+    if (back > 0) {
+      dx += back * (cape + Math.sin(time * 7 + y * 0.09 + x * 0.06) * 1.3 * wave);
+      dy += back * Math.sin(time * 5.3 + x * 0.11) * 0.9 * wave;
+    }
+    if (walking && h < 0.42) {                                              // pernas alternam a subir
+      const legs = 1 - h / 0.42, sn = Math.sin(ph);
+      dy -= (x > 0 ? Math.max(0, sn) : Math.max(0, -sn)) * 2.6 * legs;
+      dx += sn * 1.2 * legs * (x > 0 ? 1 : -1);
+    }
+    if (guard) {                                                            // punhos da guarda a "bombear" como um lutador
+      const f1 = Math.exp(-(((x - 34) ** 2 + (y + 64) ** 2) / 260)), f2 = Math.exp(-(((x + 8) ** 2 + (y + 70) ** 2) / 260));
+      dy += Math.sin(time * 4.2) * 1.8 * f1 + Math.sin(time * 4.2 + 1.6) * 1.4 * f2;
+      dx += Math.cos(time * 4.2) * 0.8 * f1;
+    }
+    if (recoil) { dx -= recoil * h2 * h; dy += buzz * h2; }                // o laser empurra a cabeça para trás
+    if (jt < 0.55) {                                                        // tremor a partir do ponto de impacto
+      const ddx = x - j.x, ddy = y - j.y, d = Math.hypot(ddx, ddy) + 1;
+      const a = j.amp * Math.exp(-d / 45) * Math.sin(jt * 48) * Math.exp(-jt * 9);
+      dx += ddx / d * a; dy += ddy / d * a;
+    }
+    _d[0] = dx; _d[1] = dy; return _d;
+  };
+}
+function trooperField(e) {
+  const bend = e.bend || 0, land = e.land || 0, j = e.jig, jt = j ? j.t : 9;
+  const br = Math.sin(time * 2 + e.home) * 0.5 + 0.5, heavyStep = Math.abs(e.vx) > 30 ? Math.abs(Math.sin(e.walkPh || 0)) : 0;
+  return (x, y) => {
+    const h = clamp(-y / 130, 0, 1), h2 = h * h;
+    let dx = bend * h2, dy = land * h * 4 + heavyStep * 1.6 * h;            // passo pesado afunda o tronco
+    const chest = Math.exp(-(((y + 82) / 20) ** 2));
+    dx += x * br * 0.022 * chest; dy -= br * 1 * h2;
+    if (x < -8 && y < -92) dy += Math.sin(time * 9 + e.home) * 0.7;        // mochila a vibrar
+    if (jt < 0.55) {
+      const ddx = x - j.x, ddy = y - j.y, d = Math.hypot(ddx, ddy) + 1;
+      const a = j.amp * Math.exp(-d / 50) * Math.sin(jt * 40) * Math.exp(-jt * 8);
+      dx += ddx / d * a; dy += ddy / d * a;
+    }
+    _d[0] = dx; _d[1] = dy; return _d;
+  };
+}
+let curKaneField = null;
+function drawPose(img, row, col, pose, ox = 0, oy = 0) {
+  if (pose !== "kneel") return drawWarped(img, ATLAS, "K", row, col, curKaneField || kaneField(pose), ox, oy);
   const kp = easeInOut(k.kneel), HIP = -54, comp = 1 - 0.52 * kp, drop = -HIP * 0.52 * kp;
   const pant = Math.sin(time * 8.4) * 1.6 * kp;
   ctx.save(); ctx.scale(1 + 0.14 * kp, comp);
@@ -2026,6 +2129,7 @@ function drawKaneBack(row, col, pose) {
   ctx.restore(); NORMAL();
 }
 function drawKaneSprite(row, col, pose) {
+  curKaneField = kaneField(pose);
   ctx.save(); kaneTransform(pose);
   const blink = k.invuln > 0 && Math.floor(k.invuln * 20) % 2;
   ctx.globalAlpha = blink ? 0.45 : 1;
@@ -2034,8 +2138,8 @@ function drawKaneSprite(row, col, pose) {
   ADD();
   if (k.hurtFlash > 0) { ctx.globalAlpha = k.hurtFlash / 0.25 * 0.45; drawPose(tinted(PAL.red), row, col, pose); }
   if (k.whiteFlash > 0) { ctx.globalAlpha = 0.9; drawPose(tinted("#ffffff"), row, col, pose); }
-  if (k.action === "laser" && k.beam && k.laserLevel >= 2) { ctx.globalAlpha = 0.05 * (k.laserLevel - 1) * (0.7 + 0.3 * Math.sin(time * 29)); drawSprite(tinted(C.laserLevels[k.laserLevel - 1].mid), row, col); }
-  ctx.restore(); NORMAL();
+  if (k.action === "laser" && k.beam && k.laserLevel >= 2) { ctx.globalAlpha = 0.05 * (k.laserLevel - 1) * (0.7 + 0.3 * Math.sin(time * 29)); drawPose(tinted(C.laserLevels[k.laserLevel - 1].mid), row, col, pose); }
+  ctx.restore(); NORMAL(); curKaneField = null;
 }
 function drawKaneFront(row, col, pose) {
   ctx.save(); kaneTransform(pose);
